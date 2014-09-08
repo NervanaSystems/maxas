@@ -1,0 +1,56 @@
+# Kernel: microbench
+# InsCnt: 18
+# RegCnt: 5
+# SharedSize: 4096
+# BarCnt: 1
+# Params(3):
+#	ord:addr:size:align
+#	0:0x140:4:0
+#	1:0x144:4:0
+#	2:0x148:4:0
+
+// This is a simple micro bench to demonstrate the latency in loading SR_TID.X
+
+<REGISTER_MAPPING>
+
+	0-20 : out, clocks, in, tid, clock1, clock2, result
+
+</REGISTER_MAPPING>
+
+// Load in our params
+--:-:-:-:1      MOV out,    c[0x0][0x140];
+--:-:-:-:1      MOV clocks, c[0x0][0x144];
+--:-:-:-:1      MOV in,     c[0x0][0x148];
+
+// Get the first clock value
+--:-:-:-:1      CS2R clock1, SR_CLOCKLO;
+
+// Get the threadId,
+// Set the Read-After-Write dependency barrier 1
+// Add one additional clock stall to allow the barrier time to set prior to next instruction that uses it
+--:-:1:-:2      S2R tid,   SR_TID.X;
+
+// Get the second clock value
+// Wait on the depenedency barrier that was set in the prior instruction
+// Stall 6 to allow CS2R time to complete before next instruction
+// CS2R takes a constant 6 clocks to complete unlike S2R which is a variable 22-44 clocks
+// This stall count does not factor into the time calculation at all
+01:-:-:-:6      CS2R clock2, SR_CLOCKLO;
+
+// Take the difference of clocks
+--:-:-:-:1      IADD clock1, clock2, -clock1;
+// Put some random data on our output register
+--:-:-:-:1      MOV32I result, 0x457;
+
+// Setup our output addresses
+// Stall tid*4 by 6 clocks to allow 6 clock pipeline instuction time to complete
+--:-:-:-:6      SHL  tid, tid, 0x2;
+--:-:-:-:1      IADD clocks, clocks, tid;
+--:-:-:-:1      IADD out,  out,  tid;
+
+// Output the results.
+// No stall needed on prior instruction as memory store instructions have a 5 clock delay in picking up register values
+--:-:-:-:1      STG [clocks], clock1;
+--:-:-:-:1      STG [out],    result;
+--:-:-:-:5      EXIT;
+
