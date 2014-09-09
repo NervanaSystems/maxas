@@ -1,0 +1,988 @@
+# Kernel: sgemm_kernel_128
+#
+# SharedSize: 16384
+# Params(8):
+#	0:0x140:4:4	param_C,
+#	1:0x144:4:0	param_m,
+#	2:0x148:4:0	param_n,
+#	3:0x14c:4:0	param_k,
+#	4:0x150:4:0	param_lda,
+#	5:0x154:4:0	param_ldb,
+#	6:0x158:4:0	param_ldc
+#	7:0x15c:4:0	param_D // for diagnostic printf output
+#
+# Globals:
+#   c[0x0][0x160]: texA
+#   c[0x0][0x164]: texB
+
+<REGISTER_MAPPING>
+
+	// 64 maxtrix C output registers.
+	// Use special mapping to improve register bank bandwidth.
+	// This alone improves performance by about 200 GFlops on GM107.
+	 3, 2,11,10,19,18,27,26 : cx00y<00-03|16-19>
+	 7, 6,15,14,23,22,31,30 : cx01y<00-03|16-19>
+	 1, 0, 9, 8,17,16,25,24 : cx02y<00-03|16-19>
+	 5, 4,13,12,21,20,29,28 : cx03y<00-03|16-19>
+	35,34,43,42,51,50,59,58 : cx32y<00-03|16-19>
+	39,38,47,46,55,54,63,62 : cx33y<00-03|16-19>
+	33,32,41,40,49,48,57,56 : cx34y<00-03|16-19>
+	37,36,45,44,53,52,61,60 : cx35y<00-03|16-19>
+
+	// You can try this naive combination to see the difference.
+	// 0-31 : cx00y<00-03|16-19>, cx01y<00-03|16-19>, cx02y<00-03|16-19>, cx03y<00-03|16-19>,
+	//32-63 : cx32y<00-03|16-19>, cx33y<00-03|16-19>, cx34y<00-03|16-19>, cx35y<00-03|16-19>
+
+	// Double buffered register blocking
+	64-79   : j0Ax<00-03|32-35>, j0By<00-03|16-19>
+	80-95   : j1Ax<00-03|32-35>, j1By<00-03|16-19>
+
+	// Registers to load A or B
+	96-103  : loadX<0-7>
+
+	// Key state registers for main loop
+	104-127 : track<0-7>, writeS, ldx8, end, tex, readAs, readBs, tid, tid4, tid32, bx, by
+
+	// Temporary registers to calculate the state registers. Reuse the C output registers.
+	0-63    : blk, ldx, ldx4, k, texMask, val<0-2>, xmad<0-1>
+
+	// Registers to store the results back to global memory. Reuse any register not needed after the main loop.
+	64-79   : cs<0-7>, Cy00, Cy04, Cy08, Cy12, cy00, cy04, cy08, cy12
+	80-115  : m, n, ldc, ldc1, ldc4, ldc8, ldc12, writeCs, readCs, cx, ci, val3, xmad2, D
+
+</REGISTER_MAPPING>
+
+// Scheduler doesn't handle the dependency flags yet,
+// so move these first instructions outside the block that's auto scheduled
+--:-:1:-:1      S2R tid, SR_TID.X;   // Set Dep 1
+--:-:2:-:1      S2R bx,  SR_CTAID.X; // Set Dep 2
+--:-:3:-:1      S2R by,  SR_CTAID.Y; // Set Dep 3
+
+// Instructions in a SCHEDULE_BLOCK are automatically reordered and appropriately stalled for simple dependancies
+// Memory dependencies are left up to the auther to deal with manually for now.
+01:-:-:Y:1      ISETP.GE.AND P0, PT, tid, 0x80, PT;
+--:-:-:-:1      BFE.U32 tid4, tid, 0x205;
+--:-:-:-:1      LOP.AND tid32, tid, 0x1f;
+--:-:-:-:1      SHR.U32 readAs, tid, 0x7;
+--:-:-:-:1      MOV32I texMask, 0x80000000;
+--:-:-:-:1      SHR.U32 val2, tid, 0x3;
+--:-:-:-:1      MOV k, c[0x0][0x14c];
+--:-:-:-:1      BFE.U32 val0, tid, 0x301;
+--:-:-:-:1      LOP.AND val1, tid, 0x1;
+--:-:-:-:2      ISCADD writeS, tid4, tid32, 0x7;
+--:-:-:-:1      LOP.AND val2, val2, 0x2;
+--:-:-:-:1      SHL readAs, readAs, 0x4;
+--:-:-:-:1 @!P0 MOV ldx, c[0x0][0x150];
+--:-:-:-:1      SHL readBs, tid4, 0x3;
+--:-:-:-:1  @P0 MOV ldx, c[0x0][0x154];
+--:-:-:-:1      SHL writeS, writeS, 0x2;
+06:-:-:-:1      SEL blk, by, bx, P0;
+--:-:-:-:1 @!P0 LOP.OR tex, texMask, c[0x0][0x160];
+--:-:-:-:1  @P0 LOP.OR tex, texMask, c[0x0][0x164];
+--:-:-:-:1      IADD k, k, -0x8;
+--:-:-:-:1      XMAD.MRG xmad0, ldx, tid4.H1, RZ;
+--:-:-:-:1      LOP.OR readAs, readAs, val0;
+--:-:-:-:1      ISCADD track0, blk, tid32, 0x7;
+--:-:-:-:1      LOP3.LUT readBs, readBs, val1, val2, 0xfe;
+--:-:-:-:1      SHL ldx4, ldx, 0x2;
+--:-:-:-:1  @P0 IADD writeS, writeS, 0x1000;
+--:-:-:-:2      XMAD.MRG xmad1, k, ldx.H1, RZ;
+--:-:-:-:2      XMAD track0, ldx, tid4, track0;
+--:-:-:-:1      IADD ldx8, ldx4, ldx4;
+--:-:-:-:2      SHL readAs, readAs, 0x4;
+--:-:-:-:2      ISCADD readBs, readBs, 0x1000, 0x4;
+--:-:-:-:2      XMAD.PSL.CBCC track0, ldx.H1, xmad0.H1, track0;
+--:-:-:-:4      TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;
+--:-:-:-:1      IADD track1, track0, 0x20;
+--:-:-:-:1      XMAD end, k, ldx, track0;
+--:-:-:-:0      IADD track2, track0, 0x40;
+--:-:-:-:1      TLD.B.LZ.T loadX1, track1, tex, 0x0, 1D, 0x1;
+--:-:-:-:0      IADD track3, track0, 0x60;
+--:-:-:-:1      TLD.B.LZ.T loadX2, track2, tex, 0x0, 1D, 0x1;
+--:-:-:-:0      IADD track4, track0, ldx4;
+--:-:-:-:2      TLD.B.LZ.T loadX3, track3, tex, 0x0, 1D, 0x1;
+--:-:-:-:0      IADD track5, track1, ldx4;
+--:-:-:-:1      TLD.B.LZ.T loadX4, track4, tex, 0x0, 1D, 0x1;
+--:-:-:-:1      XMAD.PSL.CBCC end, k.H1, xmad1.H1, end;
+--:-:-:-:0      IADD track6, track2, ldx4;
+--:-:-:-:1      TLD.B.LZ.T loadX5, track5, tex, 0x0, 1D, 0x1;
+--:-:-:-:0      IADD track7, track3, ldx4;
+--:-:-:-:2      TLD.B.LZ.T loadX6, track6, tex, 0x0, 1D, 0x1;
+--:-:2:Y:2      TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1;
+
+// Increment tracks after the loads are complete to avoid needing write-after-read dependencies
+02:-:-:-:1      STS [writeS + 0x000], loadX0; // Wait Dep 2
+--:-:-:-:0      IADD track0, track0, ldx8;    // Dual Issue
+--:-:-:-:1      STS [writeS + 0x080], loadX1;
+--:-:-:-:0      IADD track1, track1, ldx8;
+--:-:-:-:1      STS [writeS + 0x100], loadX2;
+--:-:-:-:0      IADD track2, track2, ldx8;
+--:-:-:-:1      STS [writeS + 0x180], loadX3;
+--:-:-:-:0      IADD track3, track3, ldx8;
+--:-:-:-:1      STS [writeS + 0x800], loadX4;
+--:-:-:-:0      IADD track4, track4, ldx8;
+--:-:-:-:1      STS [writeS + 0x880], loadX5;
+--:-:-:-:0      IADD track5, track5, ldx8;
+--:-:-:-:1      STS [writeS + 0x900], loadX6;
+--:-:-:-:0      IADD track6, track6, ldx8;
+--:-:-:-:1      STS [writeS + 0x980], loadX7;
+--:-:-:-:0      IADD track7, track7, ldx8;
+
+// Wait for all threads to finish loading shared
+--:-:-:-:5      BAR.SYNC 0x0;
+
+// Next write to shared goes to high area.
+// Having 2 share buffers allows us to eliminate a bar.sync in the main loop
+// Must go after BAR.SYNC to avoid needing WaR dep
+--:-:-:-:1      LOP.XOR writeS, writeS, 0x2000;
+
+// Preload the fist lines of A and B from shared
+// Initialize C registeres to zero
+// Populate the ffma index to C register name mapping
+--:-:-:-:0      MOV cx00y00, RZ;
+--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 0x00];
+--:-:-:-:1      MOV cx02y00, RZ;
+--:-:-:-:0      MOV cx00y01, RZ;
+--:-:-:-:1      LDS.U.128 j0By00, [readBs + 0x00];
+--:-:-:-:1      MOV cx02y01, RZ;
+--:-:-:-:0      MOV cx01y00, RZ;
+--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 0x80];
+--:-:-:-:1      MOV cx03y00, RZ;
+--:-:-:-:0      MOV cx01y01, RZ;
+--:-:1:-:1      LDS.U.128 j0By16, [readBs + 0x40]; // Set Dep 1
+--:-:-:-:1      MOV cx03y01, RZ;
+--:-:-:-:1      MOV cx32y00, RZ;
+--:-:-:-:1      MOV cx34y00, RZ;
+--:-:-:-:1      MOV cx32y01, RZ;
+--:-:-:-:1      MOV cx34y01, RZ;
+--:-:-:-:1      MOV cx33y00, RZ;
+--:-:-:-:1      MOV cx35y00, RZ;
+--:-:-:-:1      MOV cx33y01, RZ;
+--:-:-:-:1      MOV cx35y01, RZ;
+--:-:-:-:1      MOV cx33y02, RZ;
+--:-:-:-:1      MOV cx35y02, RZ;
+--:-:-:-:1      MOV cx33y03, RZ;
+--:-:-:-:1      MOV cx35y03, RZ;
+--:-:-:-:1      MOV cx32y02, RZ;
+--:-:-:-:1      MOV cx34y02, RZ;
+--:-:-:-:1      MOV cx32y03, RZ;
+--:-:-:-:1      MOV cx34y03, RZ;
+--:-:-:-:1      MOV cx01y02, RZ;
+--:-:-:-:1      MOV cx03y02, RZ;
+--:-:-:-:1      MOV cx01y03, RZ;
+--:-:-:-:1      MOV cx03y03, RZ;
+--:-:-:-:1      MOV cx00y02, RZ;
+--:-:-:-:1      MOV cx02y02, RZ;
+--:-:-:-:1      MOV cx00y03, RZ;
+--:-:-:-:1      MOV cx02y03, RZ;
+--:-:-:-:1      MOV cx00y16, RZ;
+--:-:-:-:1      MOV cx02y16, RZ;
+--:-:-:-:1      MOV cx00y17, RZ;
+--:-:-:-:1      MOV cx02y17, RZ;
+--:-:-:-:1      MOV cx01y16, RZ;
+--:-:-:-:1      MOV cx03y16, RZ;
+--:-:-:-:1      MOV cx01y17, RZ;
+--:-:-:-:1      MOV cx03y17, RZ;
+--:-:-:-:1      MOV cx32y16, RZ;
+--:-:-:-:1      MOV cx34y16, RZ;
+--:-:-:-:1      MOV cx32y17, RZ;
+--:-:-:-:1      MOV cx34y17, RZ;
+--:-:-:-:1      MOV cx33y16, RZ;
+--:-:-:-:1      MOV cx35y16, RZ;
+--:-:-:-:1      MOV cx33y17, RZ;
+--:-:-:-:1      MOV cx35y17, RZ;
+--:-:-:-:1      MOV cx33y18, RZ;
+--:-:-:-:1      MOV cx35y18, RZ;
+--:-:-:-:1      MOV cx33y19, RZ;
+--:-:-:-:1      MOV cx35y19, RZ;
+--:-:-:-:1      MOV cx32y18, RZ;
+--:-:-:-:1      MOV cx34y18, RZ;
+--:-:-:-:1      MOV cx32y19, RZ;
+--:-:-:-:1      MOV cx34y19, RZ;
+--:-:-:-:1      MOV cx01y18, RZ;
+--:-:-:-:1      MOV cx03y18, RZ;
+--:-:-:-:1      MOV cx01y19, RZ;
+--:-:-:-:1      MOV cx03y19, RZ;
+--:-:-:-:1      MOV cx00y18, RZ;
+--:-:-:-:1      MOV cx02y18, RZ;
+--:-:-:-:1      MOV cx00y19, RZ;
+--:-:-:-:1      MOV cx02y19, RZ;
+
+// The main loop
+// While calculating the first line, load in the next line from shared.
+// Shared memory stores enough to do this 8 times per loop.
+// Also pull in the next block of memory from global and store it to shared.
+
+// Efficiency:
+// ffma: 512
+// lds:  32 dual issued
+// sts:  8  dual issued
+// tex:  8  dual issued
+// add:  8
+// xor:  3
+// setp: 1
+// bar:  1  dual issued
+// bra:  1  dual issued
+// Total: 524 (512/524 = 97.7% FFMA)
+
+LOOP:
+
+// Loop end condition
+--:-:-:-:1      ISETP.LE.AND P0, PT, track0, end, PT;
+
+01:-:-:-:0      FFMA cx00y00, j0Ax00, j0By00, cx00y00;
+--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 0x200];
+--:-:-:-:1      FFMA cx02y00, j0Ax02, j0By00, cx02y00;
+--:-:-:-:0      FFMA cx00y01, j0Ax00, j0By01, cx00y01;
+--:-:-:-:1      LDS.U.128 j1By00, [readBs + 0x200];
+--:-:-:-:1      FFMA cx02y01, j0Ax02, j0By01, cx02y01;
+--:-:-:-:0      FFMA cx01y00, j0Ax01, j0By00, cx01y00;
+--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 0x280];
+--:-:-:-:1      FFMA cx03y00, j0Ax03, j0By00, cx03y00;
+--:-:-:-:0      FFMA cx01y01, j0Ax01, j0By01, cx01y01;
+--:-:1:-:1      LDS.U.128 j1By16, [readBs + 0x240]; // Set Dep 1
+--:-:-:-:1      FFMA cx03y01, j0Ax03, j0By01, cx03y01;
+--:-:-:-:1      FFMA cx32y00, j0Ax32, j0By00, cx32y00;
+--:-:-:-:1      FFMA cx34y00, j0Ax34, j0By00, cx34y00;
+--:-:-:-:1      FFMA cx32y01, j0Ax32, j0By01, cx32y01;
+--:-:-:-:1      FFMA cx34y01, j0Ax34, j0By01, cx34y01;
+--:-:-:-:1      FFMA cx33y00, j0Ax33, j0By00, cx33y00;
+--:-:-:-:1      FFMA cx35y00, j0Ax35, j0By00, cx35y00;
+--:-:-:-:1      FFMA cx33y01, j0Ax33, j0By01, cx33y01;
+--:-:-:-:1      FFMA cx35y01, j0Ax35, j0By01, cx35y01;
+--:-:-:-:1      FFMA cx33y02, j0Ax33, j0By02, cx33y02;
+--:-:-:-:1      FFMA cx35y02, j0Ax35, j0By02, cx35y02;
+--:-:-:-:1      FFMA cx33y03, j0Ax33, j0By03, cx33y03;
+--:-:-:-:1      FFMA cx35y03, j0Ax35, j0By03, cx35y03;
+--:-:-:-:1      FFMA cx32y02, j0Ax32, j0By02, cx32y02;
+--:-:-:-:1      FFMA cx34y02, j0Ax34, j0By02, cx34y02;
+--:-:-:-:1      FFMA cx32y03, j0Ax32, j0By03, cx32y03;
+--:-:-:-:1      FFMA cx34y03, j0Ax34, j0By03, cx34y03;
+--:-:-:-:1      FFMA cx01y02, j0Ax01, j0By02, cx01y02;
+--:-:-:-:1      FFMA cx03y02, j0Ax03, j0By02, cx03y02;
+--:-:-:-:1      FFMA cx01y03, j0Ax01, j0By03, cx01y03;
+--:-:-:-:1      FFMA cx03y03, j0Ax03, j0By03, cx03y03;
+--:-:-:Y:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
+--:-:-:-:0      FFMA cx02y02, j0Ax02, j0By02, cx02y02;
+--:-:-:-:1  @P0 TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;
+--:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
+--:-:-:-:0      FFMA cx02y03, j0Ax02, j0By03, cx02y03;
+--:-:-:-:1  @P0 TLD.B.LZ.T loadX1, track1, tex, 0x0, 1D, 0x1;
+--:-:-:-:1      FFMA cx00y16, j0Ax00, j0By16, cx00y16;
+--:-:-:-:0      FFMA cx02y16, j0Ax02, j0By16, cx02y16;
+--:-:-:-:1  @P0 TLD.B.LZ.T loadX2, track2, tex, 0x0, 1D, 0x1;
+--:-:-:-:1      FFMA cx00y17, j0Ax00, j0By17, cx00y17;
+--:-:-:-:0      FFMA cx02y17, j0Ax02, j0By17, cx02y17;
+--:-:2:-:1  @P0 TLD.B.LZ.P loadX3, track3, tex, 0x0, 1D, 0x1; // Set Dep 2
+--:-:-:-:1      FFMA cx01y16, j0Ax01, j0By16, cx01y16;
+--:-:-:-:1      FFMA cx03y16, j0Ax03, j0By16, cx03y16;
+--:-:-:-:1      FFMA cx01y17, j0Ax01, j0By17, cx01y17;
+--:-:-:-:1      FFMA cx03y17, j0Ax03, j0By17, cx03y17;
+--:-:-:-:1      FFMA cx32y16, j0Ax32, j0By16, cx32y16;
+--:-:-:-:1      FFMA cx34y16, j0Ax34, j0By16, cx34y16;
+--:-:-:-:1      FFMA cx32y17, j0Ax32, j0By17, cx32y17;
+--:-:-:-:1      FFMA cx34y17, j0Ax34, j0By17, cx34y17;
+--:-:-:-:1      FFMA cx33y16, j0Ax33, j0By16, cx33y16;
+--:-:-:-:1      FFMA cx35y16, j0Ax35, j0By16, cx35y16;
+--:-:-:-:1      FFMA cx33y17, j0Ax33, j0By17, cx33y17;
+--:-:-:-:1      FFMA cx35y17, j0Ax35, j0By17, cx35y17;
+--:-:-:-:1      FFMA cx33y18, j0Ax33, j0By18, cx33y18;
+--:-:-:-:1      FFMA cx35y18, j0Ax35, j0By18, cx35y18;
+--:-:-:-:1      FFMA cx33y19, j0Ax33, j0By19, cx33y19;
+--:-:-:-:1      FFMA cx35y19, j0Ax35, j0By19, cx35y19;
+--:-:-:-:1      FFMA cx32y18, j0Ax32, j0By18, cx32y18;
+--:-:-:-:1      FFMA cx34y18, j0Ax34, j0By18, cx34y18;
+--:-:-:-:1      FFMA cx32y19, j0Ax32, j0By19, cx32y19;
+--:-:-:-:1      FFMA cx34y19, j0Ax34, j0By19, cx34y19;
+--:-:-:-:1      FFMA cx01y18, j0Ax01, j0By18, cx01y18;
+--:-:-:-:1      FFMA cx03y18, j0Ax03, j0By18, cx03y18;
+--:-:-:-:1      FFMA cx01y19, j0Ax01, j0By19, cx01y19;
+--:-:-:-:1      FFMA cx03y19, j0Ax03, j0By19, cx03y19;
+--:-:-:-:1      FFMA cx00y18, j0Ax00, j0By18, cx00y18;
+--:-:-:-:1      FFMA cx02y18, j0Ax02, j0By18, cx02y18;
+--:-:-:-:1      FFMA cx00y19, j0Ax00, j0By19, cx00y19;
+--:-:-:-:1      FFMA cx02y19, j0Ax02, j0By19, cx02y19;
+01:-:-:-:0      FFMA cx00y00, j1Ax00, j1By00, cx00y00;
+--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 0x400];
+--:-:-:-:1      FFMA cx02y00, j1Ax02, j1By00, cx02y00;
+--:-:-:-:0      FFMA cx00y01, j1Ax00, j1By01, cx00y01;
+--:-:-:-:1      LDS.U.128 j0By00, [readBs + 0x400];
+--:-:-:-:1      FFMA cx02y01, j1Ax02, j1By01, cx02y01;
+--:-:-:-:0      FFMA cx01y00, j1Ax01, j1By00, cx01y00;
+--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 0x480];
+--:-:-:-:1      FFMA cx03y00, j1Ax03, j1By00, cx03y00;
+--:-:-:-:0      FFMA cx01y01, j1Ax01, j1By01, cx01y01;
+--:-:1:-:1      LDS.U.128 j0By16, [readBs + 0x440]; // Set Dep 1
+--:-:-:-:1      FFMA cx03y01, j1Ax03, j1By01, cx03y01;
+--:-:-:-:1      FFMA cx32y00, j1Ax32, j1By00, cx32y00;
+--:-:-:-:1      FFMA cx34y00, j1Ax34, j1By00, cx34y00;
+--:-:-:-:1      FFMA cx32y01, j1Ax32, j1By01, cx32y01;
+--:-:-:-:1      FFMA cx34y01, j1Ax34, j1By01, cx34y01;
+--:-:-:-:1      FFMA cx33y00, j1Ax33, j1By00, cx33y00;
+--:-:-:-:1      FFMA cx35y00, j1Ax35, j1By00, cx35y00;
+--:-:-:-:1      FFMA cx33y01, j1Ax33, j1By01, cx33y01;
+--:-:-:-:1      FFMA cx35y01, j1Ax35, j1By01, cx35y01;
+--:-:-:-:1      FFMA cx33y02, j1Ax33, j1By02, cx33y02;
+--:-:-:-:1      FFMA cx35y02, j1Ax35, j1By02, cx35y02;
+--:-:-:-:1      FFMA cx33y03, j1Ax33, j1By03, cx33y03;
+--:-:-:-:1      FFMA cx35y03, j1Ax35, j1By03, cx35y03;
+--:-:-:-:1      FFMA cx32y02, j1Ax32, j1By02, cx32y02;
+--:-:-:-:1      FFMA cx34y02, j1Ax34, j1By02, cx34y02;
+--:-:-:-:1      FFMA cx32y03, j1Ax32, j1By03, cx32y03;
+--:-:-:-:1      FFMA cx34y03, j1Ax34, j1By03, cx34y03;
+--:-:-:-:1      FFMA cx01y02, j1Ax01, j1By02, cx01y02;
+--:-:-:-:1      FFMA cx03y02, j1Ax03, j1By02, cx03y02;
+--:-:-:-:1      FFMA cx01y03, j1Ax01, j1By03, cx01y03;
+--:-:-:-:1      FFMA cx03y03, j1Ax03, j1By03, cx03y03;
+--:-:-:Y:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
+--:-:-:-:0      FFMA cx02y02, j1Ax02, j1By02, cx02y02;
+--:-:-:-:1  @P0 TLD.B.LZ.T loadX4, track4, tex, 0x0, 1D, 0x1;
+--:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
+--:-:-:-:0      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
+--:-:-:-:1  @P0 TLD.B.LZ.T loadX5, track5, tex, 0x0, 1D, 0x1;
+--:-:-:-:1      FFMA cx00y16, j1Ax00, j1By16, cx00y16;
+--:-:-:-:0      FFMA cx02y16, j1Ax02, j1By16, cx02y16;
+--:-:-:-:1  @P0 TLD.B.LZ.T loadX6, track6, tex, 0x0, 1D, 0x1;
+--:-:-:-:1      FFMA cx00y17, j1Ax00, j1By17, cx00y17;
+--:-:-:-:0      FFMA cx02y17, j1Ax02, j1By17, cx02y17;
+--:-:3:-:1  @P0 TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1; // Set Dep 3
+--:-:-:-:1      FFMA cx01y16, j1Ax01, j1By16, cx01y16;
+--:-:-:-:1      FFMA cx03y16, j1Ax03, j1By16, cx03y16;
+--:-:-:-:1      FFMA cx01y17, j1Ax01, j1By17, cx01y17;
+--:-:-:-:1      FFMA cx03y17, j1Ax03, j1By17, cx03y17;
+--:-:-:-:1      FFMA cx32y16, j1Ax32, j1By16, cx32y16;
+--:-:-:-:1      FFMA cx34y16, j1Ax34, j1By16, cx34y16;
+--:-:-:-:1      FFMA cx32y17, j1Ax32, j1By17, cx32y17;
+--:-:-:-:1      FFMA cx34y17, j1Ax34, j1By17, cx34y17;
+--:-:-:-:1      FFMA cx33y16, j1Ax33, j1By16, cx33y16;
+--:-:-:-:1      FFMA cx35y16, j1Ax35, j1By16, cx35y16;
+--:-:-:-:1      FFMA cx33y17, j1Ax33, j1By17, cx33y17;
+--:-:-:-:1      FFMA cx35y17, j1Ax35, j1By17, cx35y17;
+--:-:-:-:1      FFMA cx33y18, j1Ax33, j1By18, cx33y18;
+--:-:-:-:1      FFMA cx35y18, j1Ax35, j1By18, cx35y18;
+--:-:-:-:1      FFMA cx33y19, j1Ax33, j1By19, cx33y19;
+--:-:-:-:1      FFMA cx35y19, j1Ax35, j1By19, cx35y19;
+--:-:-:-:1      FFMA cx32y18, j1Ax32, j1By18, cx32y18;
+--:-:-:-:1      FFMA cx34y18, j1Ax34, j1By18, cx34y18;
+--:-:-:-:1      FFMA cx32y19, j1Ax32, j1By19, cx32y19;
+--:-:-:-:1      FFMA cx34y19, j1Ax34, j1By19, cx34y19;
+--:-:-:-:1      FFMA cx01y18, j1Ax01, j1By18, cx01y18;
+--:-:-:-:1      FFMA cx03y18, j1Ax03, j1By18, cx03y18;
+--:-:-:-:1      FFMA cx01y19, j1Ax01, j1By19, cx01y19;
+--:-:-:-:1      FFMA cx03y19, j1Ax03, j1By19, cx03y19;
+--:-:-:-:1      FFMA cx00y18, j1Ax00, j1By18, cx00y18;
+--:-:-:-:1      FFMA cx02y18, j1Ax02, j1By18, cx02y18;
+--:-:-:-:1      FFMA cx00y19, j1Ax00, j1By19, cx00y19;
+--:-:-:-:1      FFMA cx02y19, j1Ax02, j1By19, cx02y19;
+01:-:-:-:0      FFMA cx00y00, j0Ax00, j0By00, cx00y00;
+--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 0x600];
+--:-:-:-:1      FFMA cx02y00, j0Ax02, j0By00, cx02y00;
+--:-:-:-:0      FFMA cx00y01, j0Ax00, j0By01, cx00y01;
+--:-:-:-:1      LDS.U.128 j1By00, [readBs + 0x600];
+--:-:-:-:1      FFMA cx02y01, j0Ax02, j0By01, cx02y01;
+--:-:-:-:0      FFMA cx01y00, j0Ax01, j0By00, cx01y00;
+--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 0x680];
+--:-:-:-:1      FFMA cx03y00, j0Ax03, j0By00, cx03y00;
+--:-:-:-:0      FFMA cx01y01, j0Ax01, j0By01, cx01y01;
+--:-:1:-:1      LDS.U.128 j1By16, [readBs + 0x640]; // Set Dep 1
+--:-:-:-:1      FFMA cx03y01, j0Ax03, j0By01, cx03y01;
+--:-:-:-:1      FFMA cx32y00, j0Ax32, j0By00, cx32y00;
+--:-:-:-:1      FFMA cx34y00, j0Ax34, j0By00, cx34y00;
+--:-:-:-:1      FFMA cx32y01, j0Ax32, j0By01, cx32y01;
+--:-:-:-:1      FFMA cx34y01, j0Ax34, j0By01, cx34y01;
+--:-:-:-:1      FFMA cx33y00, j0Ax33, j0By00, cx33y00;
+--:-:-:-:1      FFMA cx35y00, j0Ax35, j0By00, cx35y00;
+--:-:-:-:1      FFMA cx33y01, j0Ax33, j0By01, cx33y01;
+--:-:-:-:1      FFMA cx35y01, j0Ax35, j0By01, cx35y01;
+--:-:-:-:1      FFMA cx33y02, j0Ax33, j0By02, cx33y02;
+--:-:-:-:1      FFMA cx35y02, j0Ax35, j0By02, cx35y02;
+--:-:-:-:1      FFMA cx33y03, j0Ax33, j0By03, cx33y03;
+--:-:-:-:1      FFMA cx35y03, j0Ax35, j0By03, cx35y03;
+--:-:-:-:1      FFMA cx32y02, j0Ax32, j0By02, cx32y02;
+--:-:-:-:1      FFMA cx34y02, j0Ax34, j0By02, cx34y02;
+--:-:-:-:1      FFMA cx32y03, j0Ax32, j0By03, cx32y03;
+--:-:-:-:1      FFMA cx34y03, j0Ax34, j0By03, cx34y03;
+--:-:-:-:1      FFMA cx01y02, j0Ax01, j0By02, cx01y02;
+--:-:-:-:1      FFMA cx03y02, j0Ax03, j0By02, cx03y02;
+--:-:-:-:1      FFMA cx01y03, j0Ax01, j0By03, cx01y03;
+--:-:-:-:1      FFMA cx03y03, j0Ax03, j0By03, cx03y03;
+--:-:-:Y:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
+--:-:-:-:1      FFMA cx02y02, j0Ax02, j0By02, cx02y02;
+--:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
+--:-:-:-:1      FFMA cx02y03, j0Ax02, j0By03, cx02y03;
+--:-:-:-:1      FFMA cx00y16, j0Ax00, j0By16, cx00y16;
+--:-:-:-:1      FFMA cx02y16, j0Ax02, j0By16, cx02y16;
+--:-:-:-:1      FFMA cx00y17, j0Ax00, j0By17, cx00y17;
+--:-:-:-:1      FFMA cx02y17, j0Ax02, j0By17, cx02y17;
+--:-:-:-:1      FFMA cx01y16, j0Ax01, j0By16, cx01y16;
+--:-:-:-:1      FFMA cx03y16, j0Ax03, j0By16, cx03y16;
+--:-:-:-:1      FFMA cx01y17, j0Ax01, j0By17, cx01y17;
+--:-:-:-:1      FFMA cx03y17, j0Ax03, j0By17, cx03y17;
+--:-:-:-:1      FFMA cx32y16, j0Ax32, j0By16, cx32y16;
+--:-:-:-:1      FFMA cx34y16, j0Ax34, j0By16, cx34y16;
+--:-:-:-:1      FFMA cx32y17, j0Ax32, j0By17, cx32y17;
+--:-:-:-:1      FFMA cx34y17, j0Ax34, j0By17, cx34y17;
+--:-:-:-:1      FFMA cx33y16, j0Ax33, j0By16, cx33y16;
+--:-:-:-:1      FFMA cx35y16, j0Ax35, j0By16, cx35y16;
+--:-:-:-:1      FFMA cx33y17, j0Ax33, j0By17, cx33y17;
+--:-:-:-:1      FFMA cx35y17, j0Ax35, j0By17, cx35y17;
+--:-:-:-:1      FFMA cx33y18, j0Ax33, j0By18, cx33y18;
+--:-:-:-:1      FFMA cx35y18, j0Ax35, j0By18, cx35y18;
+--:-:-:-:1      FFMA cx33y19, j0Ax33, j0By19, cx33y19;
+--:-:-:-:1      FFMA cx35y19, j0Ax35, j0By19, cx35y19;
+--:-:-:-:1      FFMA cx32y18, j0Ax32, j0By18, cx32y18;
+--:-:-:-:1      FFMA cx34y18, j0Ax34, j0By18, cx34y18;
+--:-:-:-:1      FFMA cx32y19, j0Ax32, j0By19, cx32y19;
+--:-:-:-:1      FFMA cx34y19, j0Ax34, j0By19, cx34y19;
+--:-:-:-:1      FFMA cx01y18, j0Ax01, j0By18, cx01y18;
+--:-:-:-:1      FFMA cx03y18, j0Ax03, j0By18, cx03y18;
+--:-:-:-:1      FFMA cx01y19, j0Ax01, j0By19, cx01y19;
+--:-:-:-:1      FFMA cx03y19, j0Ax03, j0By19, cx03y19;
+--:-:-:-:1      FFMA cx00y18, j0Ax00, j0By18, cx00y18;
+--:-:-:-:1      FFMA cx02y18, j0Ax02, j0By18, cx02y18;
+--:-:-:-:1      FFMA cx00y19, j0Ax00, j0By19, cx00y19;
+--:-:-:-:1      FFMA cx02y19, j0Ax02, j0By19, cx02y19;
+01:-:-:-:0      FFMA cx00y00, j1Ax00, j1By00, cx00y00;
+--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 0x800];
+--:-:-:-:1      FFMA cx02y00, j1Ax02, j1By00, cx02y00;
+--:-:-:-:0      FFMA cx00y01, j1Ax00, j1By01, cx00y01;
+--:-:-:-:1      LDS.U.128 j0By00, [readBs + 0x800];
+--:-:-:-:1      FFMA cx02y01, j1Ax02, j1By01, cx02y01;
+--:-:-:-:0      FFMA cx01y00, j1Ax01, j1By00, cx01y00;
+--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 0x880];
+--:-:-:-:1      FFMA cx03y00, j1Ax03, j1By00, cx03y00;
+--:-:-:-:0      FFMA cx01y01, j1Ax01, j1By01, cx01y01;
+--:-:1:-:1      LDS.U.128 j0By16, [readBs + 0x840]; // Set Dep 1
+--:-:-:-:1      FFMA cx03y01, j1Ax03, j1By01, cx03y01;
+--:-:-:-:1      FFMA cx32y00, j1Ax32, j1By00, cx32y00;
+--:-:-:-:1      FFMA cx34y00, j1Ax34, j1By00, cx34y00;
+--:-:-:-:1      FFMA cx32y01, j1Ax32, j1By01, cx32y01;
+--:-:-:-:1      FFMA cx34y01, j1Ax34, j1By01, cx34y01;
+--:-:-:-:1      FFMA cx33y00, j1Ax33, j1By00, cx33y00;
+--:-:-:-:1      FFMA cx35y00, j1Ax35, j1By00, cx35y00;
+--:-:-:-:1      FFMA cx33y01, j1Ax33, j1By01, cx33y01;
+--:-:-:-:1      FFMA cx35y01, j1Ax35, j1By01, cx35y01;
+--:-:-:-:1      FFMA cx33y02, j1Ax33, j1By02, cx33y02;
+--:-:-:-:1      FFMA cx35y02, j1Ax35, j1By02, cx35y02;
+--:-:-:-:1      FFMA cx33y03, j1Ax33, j1By03, cx33y03;
+--:-:-:-:1      FFMA cx35y03, j1Ax35, j1By03, cx35y03;
+--:-:-:-:1      FFMA cx32y02, j1Ax32, j1By02, cx32y02;
+--:-:-:-:1      FFMA cx34y02, j1Ax34, j1By02, cx34y02;
+--:-:-:-:1      FFMA cx32y03, j1Ax32, j1By03, cx32y03;
+--:-:-:-:1      FFMA cx34y03, j1Ax34, j1By03, cx34y03;
+--:-:-:-:1      FFMA cx01y02, j1Ax01, j1By02, cx01y02;
+--:-:-:-:1      FFMA cx03y02, j1Ax03, j1By02, cx03y02;
+--:-:-:-:1      FFMA cx01y03, j1Ax01, j1By03, cx01y03;
+--:-:-:-:1      FFMA cx03y03, j1Ax03, j1By03, cx03y03;
+--:-:-:Y:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
+--:-:-:-:1      FFMA cx02y02, j1Ax02, j1By02, cx02y02;
+--:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
+--:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
+--:-:-:-:1      FFMA cx00y16, j1Ax00, j1By16, cx00y16;
+--:-:-:-:1      FFMA cx02y16, j1Ax02, j1By16, cx02y16;
+--:-:-:-:1      FFMA cx00y17, j1Ax00, j1By17, cx00y17;
+--:-:-:-:1      FFMA cx02y17, j1Ax02, j1By17, cx02y17;
+--:-:-:-:1      FFMA cx01y16, j1Ax01, j1By16, cx01y16;
+--:-:-:-:1      FFMA cx03y16, j1Ax03, j1By16, cx03y16;
+--:-:-:-:1      FFMA cx01y17, j1Ax01, j1By17, cx01y17;
+--:-:-:-:1      FFMA cx03y17, j1Ax03, j1By17, cx03y17;
+--:-:-:-:1      FFMA cx32y16, j1Ax32, j1By16, cx32y16;
+--:-:-:-:1      FFMA cx34y16, j1Ax34, j1By16, cx34y16;
+--:-:-:-:1      FFMA cx32y17, j1Ax32, j1By17, cx32y17;
+--:-:-:-:1      FFMA cx34y17, j1Ax34, j1By17, cx34y17;
+--:-:-:-:1      FFMA cx33y16, j1Ax33, j1By16, cx33y16;
+--:-:-:-:1      FFMA cx35y16, j1Ax35, j1By16, cx35y16;
+--:-:-:-:1      FFMA cx33y17, j1Ax33, j1By17, cx33y17;
+--:-:-:-:1      FFMA cx35y17, j1Ax35, j1By17, cx35y17;
+--:-:-:-:1      FFMA cx33y18, j1Ax33, j1By18, cx33y18;
+--:-:-:-:1      FFMA cx35y18, j1Ax35, j1By18, cx35y18;
+--:-:-:-:1      FFMA cx33y19, j1Ax33, j1By19, cx33y19;
+--:-:-:-:1      FFMA cx35y19, j1Ax35, j1By19, cx35y19;
+--:-:-:-:1      FFMA cx32y18, j1Ax32, j1By18, cx32y18;
+--:-:-:-:1      FFMA cx34y18, j1Ax34, j1By18, cx34y18;
+--:-:-:-:1      FFMA cx32y19, j1Ax32, j1By19, cx32y19;
+--:-:-:-:1      FFMA cx34y19, j1Ax34, j1By19, cx34y19;
+--:-:-:-:1      FFMA cx01y18, j1Ax01, j1By18, cx01y18;
+--:-:-:-:1      FFMA cx03y18, j1Ax03, j1By18, cx03y18;
+--:-:-:-:1      FFMA cx01y19, j1Ax01, j1By19, cx01y19;
+--:-:-:-:1      FFMA cx03y19, j1Ax03, j1By19, cx03y19;
+--:-:-:-:1      FFMA cx00y18, j1Ax00, j1By18, cx00y18;
+--:-:-:-:1      FFMA cx02y18, j1Ax02, j1By18, cx02y18;
+--:-:-:-:1      FFMA cx00y19, j1Ax00, j1By19, cx00y19;
+--:-:-:-:1      FFMA cx02y19, j1Ax02, j1By19, cx02y19;
+01:-:-:-:0      FFMA cx00y00, j0Ax00, j0By00, cx00y00;
+--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 0xa00];
+--:-:-:-:1      FFMA cx02y00, j0Ax02, j0By00, cx02y00;
+--:-:-:-:0      FFMA cx00y01, j0Ax00, j0By01, cx00y01;
+--:-:-:-:1      LDS.U.128 j1By00, [readBs + 0xa00];
+--:-:-:-:1      FFMA cx02y01, j0Ax02, j0By01, cx02y01;
+--:-:-:-:0      FFMA cx01y00, j0Ax01, j0By00, cx01y00;
+--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 0xa80];
+--:-:-:-:1      FFMA cx03y00, j0Ax03, j0By00, cx03y00;
+--:-:-:-:0      FFMA cx01y01, j0Ax01, j0By01, cx01y01;
+--:-:1:-:1      LDS.U.128 j1By16, [readBs + 0xa40]; // Set Dep 1
+--:-:-:-:1      FFMA cx03y01, j0Ax03, j0By01, cx03y01;
+--:-:-:-:1      FFMA cx32y00, j0Ax32, j0By00, cx32y00;
+--:-:-:-:1      FFMA cx34y00, j0Ax34, j0By00, cx34y00;
+--:-:-:-:1      FFMA cx32y01, j0Ax32, j0By01, cx32y01;
+--:-:-:-:1      FFMA cx34y01, j0Ax34, j0By01, cx34y01;
+--:-:-:-:1      FFMA cx33y00, j0Ax33, j0By00, cx33y00;
+--:-:-:-:1      FFMA cx35y00, j0Ax35, j0By00, cx35y00;
+--:-:-:-:1      FFMA cx33y01, j0Ax33, j0By01, cx33y01;
+--:-:-:-:1      FFMA cx35y01, j0Ax35, j0By01, cx35y01;
+--:-:-:-:1      FFMA cx33y02, j0Ax33, j0By02, cx33y02;
+--:-:-:-:1      FFMA cx35y02, j0Ax35, j0By02, cx35y02;
+--:-:-:-:1      FFMA cx33y03, j0Ax33, j0By03, cx33y03;
+--:-:-:-:1      FFMA cx35y03, j0Ax35, j0By03, cx35y03;
+--:-:-:-:1      FFMA cx32y02, j0Ax32, j0By02, cx32y02;
+--:-:-:-:1      FFMA cx34y02, j0Ax34, j0By02, cx34y02;
+--:-:-:-:1      FFMA cx32y03, j0Ax32, j0By03, cx32y03;
+--:-:-:-:1      FFMA cx34y03, j0Ax34, j0By03, cx34y03;
+--:-:-:-:1      FFMA cx01y02, j0Ax01, j0By02, cx01y02;
+--:-:-:-:1      FFMA cx03y02, j0Ax03, j0By02, cx03y02;
+--:-:-:-:1      FFMA cx01y03, j0Ax01, j0By03, cx01y03;
+--:-:-:-:1      FFMA cx03y03, j0Ax03, j0By03, cx03y03;
+--:-:-:Y:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
+--:-:-:-:1      FFMA cx02y02, j0Ax02, j0By02, cx02y02;
+--:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
+--:-:-:-:1      FFMA cx02y03, j0Ax02, j0By03, cx02y03;
+--:-:-:-:1      FFMA cx00y16, j0Ax00, j0By16, cx00y16;
+--:-:-:-:1      FFMA cx02y16, j0Ax02, j0By16, cx02y16;
+--:-:-:-:1      FFMA cx00y17, j0Ax00, j0By17, cx00y17;
+--:-:-:-:1      FFMA cx02y17, j0Ax02, j0By17, cx02y17;
+--:-:-:-:1      FFMA cx01y16, j0Ax01, j0By16, cx01y16;
+--:-:-:-:1      FFMA cx03y16, j0Ax03, j0By16, cx03y16;
+--:-:-:-:1      FFMA cx01y17, j0Ax01, j0By17, cx01y17;
+--:-:-:-:1      FFMA cx03y17, j0Ax03, j0By17, cx03y17;
+--:-:-:-:1      FFMA cx32y16, j0Ax32, j0By16, cx32y16;
+--:-:-:-:1      FFMA cx34y16, j0Ax34, j0By16, cx34y16;
+--:-:-:-:1      FFMA cx32y17, j0Ax32, j0By17, cx32y17;
+--:-:-:-:1      FFMA cx34y17, j0Ax34, j0By17, cx34y17;
+--:-:-:-:1      FFMA cx33y16, j0Ax33, j0By16, cx33y16;
+--:-:-:-:1      FFMA cx35y16, j0Ax35, j0By16, cx35y16;
+--:-:-:-:1      FFMA cx33y17, j0Ax33, j0By17, cx33y17;
+--:-:-:-:1      FFMA cx35y17, j0Ax35, j0By17, cx35y17;
+--:-:-:-:1      FFMA cx33y18, j0Ax33, j0By18, cx33y18;
+--:-:-:-:1      FFMA cx35y18, j0Ax35, j0By18, cx35y18;
+--:-:-:-:1      FFMA cx33y19, j0Ax33, j0By19, cx33y19;
+--:-:-:-:1      FFMA cx35y19, j0Ax35, j0By19, cx35y19;
+--:-:-:-:1      FFMA cx32y18, j0Ax32, j0By18, cx32y18;
+--:-:-:-:1      FFMA cx34y18, j0Ax34, j0By18, cx34y18;
+--:-:-:-:1      FFMA cx32y19, j0Ax32, j0By19, cx32y19;
+--:-:-:-:1      FFMA cx34y19, j0Ax34, j0By19, cx34y19;
+--:-:-:-:1      FFMA cx01y18, j0Ax01, j0By18, cx01y18;
+--:-:-:-:1      FFMA cx03y18, j0Ax03, j0By18, cx03y18;
+--:-:-:-:1      FFMA cx01y19, j0Ax01, j0By19, cx01y19;
+--:-:-:-:1      FFMA cx03y19, j0Ax03, j0By19, cx03y19;
+--:-:-:-:1      FFMA cx00y18, j0Ax00, j0By18, cx00y18;
+--:-:-:-:1      FFMA cx02y18, j0Ax02, j0By18, cx02y18;
+--:-:-:-:1      FFMA cx00y19, j0Ax00, j0By19, cx00y19;
+--:-:-:-:1      FFMA cx02y19, j0Ax02, j0By19, cx02y19;
+01:-:-:-:0      FFMA cx00y00, j1Ax00, j1By00, cx00y00;
+--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 0xc00];
+--:-:-:-:1      FFMA cx02y00, j1Ax02, j1By00, cx02y00;
+--:-:-:-:0      FFMA cx00y01, j1Ax00, j1By01, cx00y01;
+--:-:-:-:1      LDS.U.128 j0By00, [readBs + 0xc00];
+--:-:-:-:1      FFMA cx02y01, j1Ax02, j1By01, cx02y01;
+--:-:-:-:0      FFMA cx01y00, j1Ax01, j1By00, cx01y00;
+--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 0xc80];
+--:-:-:-:1      FFMA cx03y00, j1Ax03, j1By00, cx03y00;
+--:-:-:-:0      FFMA cx01y01, j1Ax01, j1By01, cx01y01;
+--:-:1:-:1      LDS.U.128 j0By16, [readBs + 0xc40]; // Set Dep 1
+--:-:-:-:1      FFMA cx03y01, j1Ax03, j1By01, cx03y01;
+--:-:-:-:1      FFMA cx32y00, j1Ax32, j1By00, cx32y00;
+--:-:-:-:1      FFMA cx34y00, j1Ax34, j1By00, cx34y00;
+--:-:-:-:1      FFMA cx32y01, j1Ax32, j1By01, cx32y01;
+--:-:-:-:1      FFMA cx34y01, j1Ax34, j1By01, cx34y01;
+--:-:-:-:1      FFMA cx33y00, j1Ax33, j1By00, cx33y00;
+--:-:-:-:1      FFMA cx35y00, j1Ax35, j1By00, cx35y00;
+--:-:-:-:1      FFMA cx33y01, j1Ax33, j1By01, cx33y01;
+--:-:-:-:1      FFMA cx35y01, j1Ax35, j1By01, cx35y01;
+--:-:-:-:1      FFMA cx33y02, j1Ax33, j1By02, cx33y02;
+--:-:-:-:1      FFMA cx35y02, j1Ax35, j1By02, cx35y02;
+--:-:-:-:1      FFMA cx33y03, j1Ax33, j1By03, cx33y03;
+--:-:-:-:1      FFMA cx35y03, j1Ax35, j1By03, cx35y03;
+--:-:-:-:1      FFMA cx32y02, j1Ax32, j1By02, cx32y02;
+--:-:-:-:1      FFMA cx34y02, j1Ax34, j1By02, cx34y02;
+--:-:-:-:1      FFMA cx32y03, j1Ax32, j1By03, cx32y03;
+--:-:-:-:1      FFMA cx34y03, j1Ax34, j1By03, cx34y03;
+--:-:-:-:1      FFMA cx01y02, j1Ax01, j1By02, cx01y02;
+--:-:-:-:1      FFMA cx03y02, j1Ax03, j1By02, cx03y02;
+--:-:-:-:1      FFMA cx01y03, j1Ax01, j1By03, cx01y03;
+--:-:-:-:1      FFMA cx03y03, j1Ax03, j1By03, cx03y03;
+--:-:-:Y:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
+--:-:-:-:0      FFMA cx02y02, j1Ax02, j1By02, cx02y02;
+02:-:-:-:1  @P0 STS [writeS + 0x000], loadX0;       // Wait Dep 2
+--:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
+--:-:-:-:0      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
+--:-:-:-:1  @P0 STS [writeS + 0x080], loadX1;
+--:-:-:-:1      FFMA cx00y16, j1Ax00, j1By16, cx00y16;
+--:-:-:-:0      FFMA cx02y16, j1Ax02, j1By16, cx02y16;
+--:-:-:-:1  @P0 STS [writeS + 0x100], loadX2;
+--:-:-:-:1      FFMA cx00y17, j1Ax00, j1By17, cx00y17;
+--:-:-:-:0      FFMA cx02y17, j1Ax02, j1By17, cx02y17;
+--:-:-:-:1  @P0 STS [writeS + 0x180], loadX3;
+--:-:-:-:1      FFMA cx01y16, j1Ax01, j1By16, cx01y16;
+--:-:-:-:1      FFMA cx03y16, j1Ax03, j1By16, cx03y16;
+--:-:-:-:1      FFMA cx01y17, j1Ax01, j1By17, cx01y17;
+--:-:-:-:1      FFMA cx03y17, j1Ax03, j1By17, cx03y17;
+--:-:-:-:1      FFMA cx32y16, j1Ax32, j1By16, cx32y16;
+--:-:-:-:1      FFMA cx34y16, j1Ax34, j1By16, cx34y16;
+--:-:-:-:1      FFMA cx32y17, j1Ax32, j1By17, cx32y17;
+--:-:-:-:1      FFMA cx34y17, j1Ax34, j1By17, cx34y17;
+--:-:-:-:1      FFMA cx33y16, j1Ax33, j1By16, cx33y16;
+--:-:-:-:1      FFMA cx35y16, j1Ax35, j1By16, cx35y16;
+--:-:-:-:1      FFMA cx33y17, j1Ax33, j1By17, cx33y17;
+--:-:-:-:1      FFMA cx35y17, j1Ax35, j1By17, cx35y17;
+--:-:-:-:1      FFMA cx33y18, j1Ax33, j1By18, cx33y18;
+--:-:-:-:1      FFMA cx35y18, j1Ax35, j1By18, cx35y18;
+--:-:-:-:1      FFMA cx33y19, j1Ax33, j1By19, cx33y19;
+--:-:-:-:1      FFMA cx35y19, j1Ax35, j1By19, cx35y19;
+--:-:-:-:1      FFMA cx32y18, j1Ax32, j1By18, cx32y18;
+--:-:-:-:1      FFMA cx34y18, j1Ax34, j1By18, cx34y18;
+--:-:-:-:1      FFMA cx32y19, j1Ax32, j1By19, cx32y19;
+--:-:-:-:1      FFMA cx34y19, j1Ax34, j1By19, cx34y19;
+--:-:-:-:1      FFMA cx01y18, j1Ax01, j1By18, cx01y18;
+--:-:-:-:1      FFMA cx03y18, j1Ax03, j1By18, cx03y18;
+--:-:-:-:1      FFMA cx01y19, j1Ax01, j1By19, cx01y19;
+--:-:-:-:1      FFMA cx03y19, j1Ax03, j1By19, cx03y19;
+--:-:-:-:1      FFMA cx00y18, j1Ax00, j1By18, cx00y18;
+--:-:-:-:1      FFMA cx02y18, j1Ax02, j1By18, cx02y18;
+--:-:-:-:1      FFMA cx00y19, j1Ax00, j1By19, cx00y19;
+--:-:-:-:1      FFMA cx02y19, j1Ax02, j1By19, cx02y19;
+01:-:-:-:0      FFMA cx00y00, j0Ax00, j0By00, cx00y00;
+--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 0xe00];
+--:-:-:-:1      FFMA cx02y00, j0Ax02, j0By00, cx02y00;
+--:-:-:-:0      FFMA cx00y01, j0Ax00, j0By01, cx00y01;
+--:-:-:-:1      LDS.U.128 j1By00, [readBs + 0xe00];
+--:-:-:-:1      FFMA cx02y01, j0Ax02, j0By01, cx02y01;
+--:-:-:-:0      FFMA cx01y00, j0Ax01, j0By00, cx01y00;
+--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 0xe80];
+--:-:-:-:1      FFMA cx03y00, j0Ax03, j0By00, cx03y00;
+--:-:-:-:0      FFMA cx01y01, j0Ax01, j0By01, cx01y01;
+--:-:1:-:1      LDS.U.128 j1By16, [readBs + 0xe40]; // Set Dep 1
+--:-:-:-:1      FFMA cx03y01, j0Ax03, j0By01, cx03y01;
+--:-:-:-:1      FFMA cx32y00, j0Ax32, j0By00, cx32y00;
+--:-:-:-:1      FFMA cx34y00, j0Ax34, j0By00, cx34y00;
+--:-:-:-:1      FFMA cx32y01, j0Ax32, j0By01, cx32y01;
+--:-:-:-:1      FFMA cx34y01, j0Ax34, j0By01, cx34y01;
+--:-:-:-:1      FFMA cx33y00, j0Ax33, j0By00, cx33y00;
+--:-:-:-:1      FFMA cx35y00, j0Ax35, j0By00, cx35y00;
+--:-:-:-:1      FFMA cx33y01, j0Ax33, j0By01, cx33y01;
+--:-:-:-:1      FFMA cx35y01, j0Ax35, j0By01, cx35y01;
+--:-:-:-:1      FFMA cx33y02, j0Ax33, j0By02, cx33y02;
+--:-:-:-:1      FFMA cx35y02, j0Ax35, j0By02, cx35y02;
+--:-:-:-:1      FFMA cx33y03, j0Ax33, j0By03, cx33y03;
+--:-:-:-:1      FFMA cx35y03, j0Ax35, j0By03, cx35y03;
+--:-:-:-:1      FFMA cx32y02, j0Ax32, j0By02, cx32y02;
+--:-:-:-:1      FFMA cx34y02, j0Ax34, j0By02, cx34y02;
+--:-:-:-:1      FFMA cx32y03, j0Ax32, j0By03, cx32y03;
+--:-:-:-:1      FFMA cx34y03, j0Ax34, j0By03, cx34y03;
+--:-:-:-:1      FFMA cx01y02, j0Ax01, j0By02, cx01y02;
+--:-:-:-:1      FFMA cx03y02, j0Ax03, j0By02, cx03y02;
+--:-:-:-:1      FFMA cx01y03, j0Ax01, j0By03, cx01y03;
+--:-:-:-:1      FFMA cx03y03, j0Ax03, j0By03, cx03y03;
+--:-:-:Y:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
+--:-:-:-:0      FFMA cx02y02, j0Ax02, j0By02, cx02y02;
+04:-:-:-:1  @P0 STS [writeS + 0x800], loadX4;       // Wait Dep 3
+--:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
+--:-:-:-:0      FFMA cx02y03, j0Ax02, j0By03, cx02y03;
+--:-:-:-:1  @P0 STS [writeS + 0x880], loadX5;
+--:-:-:-:1      FFMA cx00y16, j0Ax00, j0By16, cx00y16;
+--:-:-:-:0      FFMA cx02y16, j0Ax02, j0By16, cx02y16;
+--:-:-:-:1  @P0 STS [writeS + 0x900], loadX6;
+--:-:-:-:1      FFMA cx00y17, j0Ax00, j0By17, cx00y17;
+--:-:-:-:0      FFMA cx02y17, j0Ax02, j0By17, cx02y17;
+--:-:-:-:1  @P0 STS [writeS + 0x980], loadX7;
+--:-:-:-:1      FFMA cx01y16, j0Ax01, j0By16, cx01y16;
+--:-:-:-:1      FFMA cx03y16, j0Ax03, j0By16, cx03y16;
+--:-:-:-:1      FFMA cx01y17, j0Ax01, j0By17, cx01y17;
+--:-:-:-:1      FFMA cx03y17, j0Ax03, j0By17, cx03y17;
+--:-:-:-:1      FFMA cx32y16, j0Ax32, j0By16, cx32y16;
+--:-:-:-:1      FFMA cx34y16, j0Ax34, j0By16, cx34y16;
+--:-:-:-:1      FFMA cx32y17, j0Ax32, j0By17, cx32y17;
+--:-:-:-:1      FFMA cx34y17, j0Ax34, j0By17, cx34y17;
+--:-:-:-:1      FFMA cx33y16, j0Ax33, j0By16, cx33y16;
+--:-:-:-:1      FFMA cx35y16, j0Ax35, j0By16, cx35y16;
+--:-:-:-:1      FFMA cx33y17, j0Ax33, j0By17, cx33y17;
+--:-:-:-:1      FFMA cx35y17, j0Ax35, j0By17, cx35y17;
+--:-:-:-:1      FFMA cx33y18, j0Ax33, j0By18, cx33y18;
+--:-:-:-:1      FFMA cx35y18, j0Ax35, j0By18, cx35y18;
+--:-:-:-:1      FFMA cx33y19, j0Ax33, j0By19, cx33y19;
+--:-:-:-:1      FFMA cx35y19, j0Ax35, j0By19, cx35y19;
+--:-:-:-:1      FFMA cx32y18, j0Ax32, j0By18, cx32y18;
+--:-:-:-:1      FFMA cx34y18, j0Ax34, j0By18, cx34y18;
+--:-:-:-:1      FFMA cx32y19, j0Ax32, j0By19, cx32y19;
+--:-:-:-:1      FFMA cx34y19, j0Ax34, j0By19, cx34y19;
+--:-:-:-:1      FFMA cx01y18, j0Ax01, j0By18, cx01y18;
+--:-:-:-:1      FFMA cx03y18, j0Ax03, j0By18, cx03y18;
+--:-:-:-:1      FFMA cx01y19, j0Ax01, j0By19, cx01y19;
+--:-:-:-:0      FFMA cx03y19, j0Ax03, j0By19, cx03y19;
+--:-:-:-:5  @P0 BAR.SYNC 0x0;
+--:-:-:-:1      FFMA cx00y18, j0Ax00, j0By18, cx00y18;
+--:-:-:-:1  @P0 LOP.XOR readAs, readAs, 0x2000;
+--:-:-:-:1      FFMA cx02y18, j0Ax02, j0By18, cx02y18;
+--:-:-:-:1  @P0 LOP.XOR readBs, readBs, 0x2000;
+--:-:-:-:1      FFMA cx00y19, j0Ax00, j0By19, cx00y19;
+--:-:-:-:1  @P0 LOP.XOR writeS, writeS, 0x2000;
+--:-:-:-:1      FFMA cx02y19, j0Ax02, j0By19, cx02y19;
+01:-:-:-:0      FFMA cx00y00, j1Ax00, j1By00, cx00y00;
+--:-:-:-:1  @P0 LDS.U.128 j0Ax00, [readAs + 0x000];
+--:-:-:-:1      FFMA cx02y00, j1Ax02, j1By00, cx02y00;
+--:-:-:-:0      FFMA cx00y01, j1Ax00, j1By01, cx00y01;
+--:-:-:-:1  @P0 LDS.U.128 j0By00, [readBs + 0x000];
+--:-:-:-:1      FFMA cx02y01, j1Ax02, j1By01, cx02y01;
+--:-:-:-:0      FFMA cx01y00, j1Ax01, j1By00, cx01y00;
+--:-:-:-:1  @P0 LDS.U.128 j0Ax32, [readAs + 0x080];
+--:-:-:-:1      FFMA cx03y00, j1Ax03, j1By00, cx03y00;
+--:-:-:-:0      FFMA cx01y01, j1Ax01, j1By01, cx01y01;
+--:-:1:-:1  @P0 LDS.U.128 j0By16, [readBs + 0x040]; // Set Dep 1
+--:-:-:-:1      FFMA cx03y01, j1Ax03, j1By01, cx03y01;
+--:-:-:-:1      FFMA cx32y00, j1Ax32, j1By00, cx32y00;
+--:-:-:-:1      FFMA cx34y00, j1Ax34, j1By00, cx34y00;
+--:-:-:-:1      FFMA cx32y01, j1Ax32, j1By01, cx32y01;
+--:-:-:-:1      FFMA cx34y01, j1Ax34, j1By01, cx34y01;
+--:-:-:-:1      FFMA cx33y00, j1Ax33, j1By00, cx33y00;
+--:-:-:-:1      FFMA cx35y00, j1Ax35, j1By00, cx35y00;
+--:-:-:-:1      FFMA cx33y01, j1Ax33, j1By01, cx33y01;
+--:-:-:-:1      FFMA cx35y01, j1Ax35, j1By01, cx35y01;
+--:-:-:-:1      FFMA cx33y02, j1Ax33, j1By02, cx33y02;
+--:-:-:-:1      FFMA cx35y02, j1Ax35, j1By02, cx35y02;
+--:-:-:-:1      FFMA cx33y03, j1Ax33, j1By03, cx33y03;
+--:-:-:-:1      FFMA cx35y03, j1Ax35, j1By03, cx35y03;
+--:-:-:-:1      FFMA cx32y02, j1Ax32, j1By02, cx32y02;
+--:-:-:-:1      FFMA cx34y02, j1Ax34, j1By02, cx34y02;
+--:-:-:-:1      FFMA cx32y03, j1Ax32, j1By03, cx32y03;
+--:-:-:-:1      FFMA cx34y03, j1Ax34, j1By03, cx34y03;
+--:-:-:-:1      FFMA cx01y02, j1Ax01, j1By02, cx01y02;
+--:-:-:-:1      FFMA cx03y02, j1Ax03, j1By02, cx03y02;
+--:-:-:-:1      FFMA cx01y03, j1Ax01, j1By03, cx01y03;
+--:-:-:-:1      FFMA cx03y03, j1Ax03, j1By03, cx03y03;
+--:-:-:Y:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
+--:-:-:-:1      FFMA cx02y02, j1Ax02, j1By02, cx02y02;
+--:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
+--:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
+--:-:-:-:1      FFMA cx00y16, j1Ax00, j1By16, cx00y16;
+--:-:-:-:1      FFMA cx02y16, j1Ax02, j1By16, cx02y16;
+--:-:-:-:1      FFMA cx00y17, j1Ax00, j1By17, cx00y17;
+--:-:-:-:1      FFMA cx02y17, j1Ax02, j1By17, cx02y17;
+--:-:-:-:1      FFMA cx01y16, j1Ax01, j1By16, cx01y16;
+--:-:-:-:1      FFMA cx03y16, j1Ax03, j1By16, cx03y16;
+--:-:-:-:1      FFMA cx01y17, j1Ax01, j1By17, cx01y17;
+--:-:-:-:1      FFMA cx03y17, j1Ax03, j1By17, cx03y17;
+--:-:-:-:1      FFMA cx32y16, j1Ax32, j1By16, cx32y16;
+--:-:-:-:1      FFMA cx34y16, j1Ax34, j1By16, cx34y16;
+--:-:-:-:1      FFMA cx32y17, j1Ax32, j1By17, cx32y17;
+--:-:-:-:1      FFMA cx34y17, j1Ax34, j1By17, cx34y17;
+--:-:-:-:1      FFMA cx33y16, j1Ax33, j1By16, cx33y16;
+--:-:-:-:1      FFMA cx35y16, j1Ax35, j1By16, cx35y16;
+--:-:-:-:1      FFMA cx33y17, j1Ax33, j1By17, cx33y17;
+--:-:-:-:1      FFMA cx35y17, j1Ax35, j1By17, cx35y17;
+--:-:-:-:1  @P0 IADD track0, track0, ldx8;
+--:-:-:-:1      FFMA cx33y18, j1Ax33, j1By18, cx33y18;
+--:-:-:-:1      FFMA cx35y18, j1Ax35, j1By18, cx35y18;
+--:-:-:-:1  @P0 IADD track1, track1, ldx8;
+--:-:-:-:1      FFMA cx33y19, j1Ax33, j1By19, cx33y19;
+--:-:-:-:1      FFMA cx35y19, j1Ax35, j1By19, cx35y19;
+--:-:-:-:1  @P0 IADD track2, track2, ldx8;
+--:-:-:-:1      FFMA cx32y18, j1Ax32, j1By18, cx32y18;
+--:-:-:-:1      FFMA cx34y18, j1Ax34, j1By18, cx34y18;
+--:-:-:-:1  @P0 IADD track3, track3, ldx8;
+--:-:-:-:1      FFMA cx32y19, j1Ax32, j1By19, cx32y19;
+--:-:-:-:1      FFMA cx34y19, j1Ax34, j1By19, cx34y19;
+--:-:-:-:1  @P0 IADD track4, track4, ldx8;
+--:-:-:-:1      FFMA cx01y18, j1Ax01, j1By18, cx01y18;
+--:-:-:-:1      FFMA cx03y18, j1Ax03, j1By18, cx03y18;
+--:-:-:-:1  @P0 IADD track5, track5, ldx8;
+--:-:-:-:1      FFMA cx01y19, j1Ax01, j1By19, cx01y19;
+--:-:-:-:1      FFMA cx03y19, j1Ax03, j1By19, cx03y19;
+--:-:-:-:1  @P0 IADD track6, track6, ldx8;
+--:-:-:-:1      FFMA cx00y18, j1Ax00, j1By18, cx00y18;
+--:-:-:-:1      FFMA cx02y18, j1Ax02, j1By18, cx02y18;
+--:-:-:-:1  @P0 IADD track7, track7, ldx8;
+--:-:-:-:1      FFMA cx00y19, j1Ax00, j1By19, cx00y19;
+--:-:-:-:1      FFMA cx02y19, j1Ax02, j1By19, cx02y19;
+--:-:-:Y:5  @P0 BRA LOOP;
+
+// Main loop is done, time to write C to global memory.
+--:-:-:-:1      LOP.AND cx, tid, 0x80;
+--:-:-:-:1      SHL cy00, tid4, 0x5;
+--:-:-:-:1      MOV ldc, c[0x0][0x158];
+--:-:-:-:1      SHL readCs, tid4, 0x9;
+--:-:-:-:1      LOP.AND val3, readBs, 0x180;
+--:-:-:-:1      BFE.U32 readBs, readBs, 0x502;
+--:-:-:-:1      MOV m, c[0x0][0x144];
+--:-:-:-:1      SHR.U32 cx, cx, 0x1;
+--:-:-:-:1      LOP.AND readAs, readAs, 0xfff;
+--:-:-:-:1      ISCADD cy00, by, cy00, 0x7;
+--:-:-:-:1      MOV n, c[0x0][0x148];
+--:-:-:-:2      SHL ldc4, ldc, 0x4;
+--:-:-:-:1      LOP.OR cx, tid32, cx;
+--:-:-:-:2      SHL ldc8, ldc, 0x5;
+--:-:-:-:2      XMAD.MRG xmad2, cy00, ldc.H1, RZ;
+--:-:-:-:1      SHL ldc1, ldc, 0x2;
+--:-:-:-:1      LOP.OR readCs, readCs, cx;
+--:-:-:-:1      ISCADD cx, bx, cx, 0x7;
+--:-:-:-:1      IADD ldc12, ldc8, ldc4;
+--:-:-:-:3      SHR.U32 val3, val3, 0x3;
+--:-:-:-:1      SHL readCs, readCs, 0x2;
+--:-:-:-:1      ISETP.LT.AND P5, PT, cx, m, PT;
+--:-:-:-:1      XMAD ci, cy00, ldc, cx;
+--:-:-:-:1      LOP.OR readBs, readBs, val3;
+--:-:-:-:4      IADD cx, cx, 0x20;
+--:-:-:-:1      XMAD.PSL.CBCC ci, cy00.H1, xmad2.H1, ci;
+--:-:-:-:1      IADD cy00, cy00, -0x1;
+--:-:-:-:1      ISCADD writeCs, readBs, readAs, 0x7;
+--:-:-:-:3      ISETP.LT.AND P6, PT, cx, m, PT;
+--:-:-:-:1      ISCADD Cy00, ci, c[0x0][0x140], 0x2;
+--:-:-:-:1      IADD cy04, cy00, 0x4;
+--:-:-:-:1      IADD cy08, cy00, 0x8;
+--:-:-:-:3      IADD cy12, cy00, 0xc;
+--:-:-:-:1      IADD Cy04, Cy00, ldc4;
+--:-:-:-:1      IADD Cy08, Cy00, ldc8;
+--:-:-:-:4      IADD Cy00, Cy00, -ldc1;
+--:-:-:-:1      IADD Cy12, Cy04, ldc8;
+--:-:-:-:1      IADD Cy04, Cy04, -ldc1;
+--:-:-:-:4      IADD Cy08, Cy08, -ldc1;
+--:-:-:-:1      IADD Cy12, Cy12, -ldc1;
+
+
+
+# Note CODE sections can appear inside of scheduled blocks, I just don't choose to in this example.
+
+--:-:-:-:1      MOV cs0, cx00y00;
+--:-:-:-:1      MOV cs1, cx01y00;
+--:-:-:-:1      MOV cs2, cx02y00;
+--:-:-:-:1      MOV cs3, cx03y00;
+--:-:-:-:1      MOV cs4, cx32y00;
+--:-:-:-:1      MOV cs5, cx33y00;
+--:-:-:-:1      MOV cs6, cx34y00;
+--:-:-:-:1      MOV cs7, cx35y00;
+--:-:-:-:5      CAL STORE_C;
+
+02:-:-:-:1      MOV cs0, cx00y01;
+--:-:-:-:1      MOV cs1, cx01y01;
+--:-:-:-:1      MOV cs2, cx02y01;
+--:-:-:-:1      MOV cs3, cx03y01;
+--:-:-:-:1      MOV cs4, cx32y01;
+--:-:-:-:1      MOV cs5, cx33y01;
+--:-:-:-:1      MOV cs6, cx34y01;
+--:-:-:-:1      MOV cs7, cx35y01;
+--:-:-:-:5      CAL STORE_C;
+
+02:-:-:-:1      MOV cs0, cx00y02;
+--:-:-:-:1      MOV cs1, cx01y02;
+--:-:-:-:1      MOV cs2, cx02y02;
+--:-:-:-:1      MOV cs3, cx03y02;
+--:-:-:-:1      MOV cs4, cx32y02;
+--:-:-:-:1      MOV cs5, cx33y02;
+--:-:-:-:1      MOV cs6, cx34y02;
+--:-:-:-:1      MOV cs7, cx35y02;
+--:-:-:-:5      CAL STORE_C;
+
+02:-:-:-:1      MOV cs0, cx00y03;
+--:-:-:-:1      MOV cs1, cx01y03;
+--:-:-:-:1      MOV cs2, cx02y03;
+--:-:-:-:1      MOV cs3, cx03y03;
+--:-:-:-:1      MOV cs4, cx32y03;
+--:-:-:-:1      MOV cs5, cx33y03;
+--:-:-:-:1      MOV cs6, cx34y03;
+--:-:-:-:1      MOV cs7, cx35y03;
+--:-:-:-:5      CAL STORE_C;
+
+--:-:-:-:1      IADD cy00, cy00, 0xc;
+--:-:-:-:1      IADD cy04, cy04, 0xc;
+--:-:-:-:1      IADD cy08, cy08, 0xc;
+--:-:-:-:1      IADD cy12, cy12, 0xc;
+
+02:-:-:-:1      IADD Cy00, Cy00, ldc12;
+--:-:-:-:1      IADD Cy04, Cy04, ldc12;
+--:-:-:-:1      IADD Cy08, Cy08, ldc12;
+--:-:-:-:1      IADD Cy12, Cy12, ldc12;
+
+--:-:-:-:1      MOV cs0, cx00y16;
+--:-:-:-:1      MOV cs1, cx01y16;
+--:-:-:-:1      MOV cs2, cx02y16;
+--:-:-:-:1      MOV cs3, cx03y16;
+--:-:-:-:1      MOV cs4, cx32y16;
+--:-:-:-:1      MOV cs5, cx33y16;
+--:-:-:-:1      MOV cs6, cx34y16;
+--:-:-:-:1      MOV cs7, cx35y16;
+--:-:-:-:5      CAL STORE_C;
+
+02:-:-:-:1      MOV cs0, cx00y17;
+--:-:-:-:1      MOV cs1, cx01y17;
+--:-:-:-:1      MOV cs2, cx02y17;
+--:-:-:-:1      MOV cs3, cx03y17;
+--:-:-:-:1      MOV cs4, cx32y17;
+--:-:-:-:1      MOV cs5, cx33y17;
+--:-:-:-:1      MOV cs6, cx34y17;
+--:-:-:-:1      MOV cs7, cx35y17;
+--:-:-:-:5      CAL STORE_C;
+
+02:-:-:-:1      MOV cs0, cx00y18;
+--:-:-:-:1      MOV cs1, cx01y18;
+--:-:-:-:1      MOV cs2, cx02y18;
+--:-:-:-:1      MOV cs3, cx03y18;
+--:-:-:-:1      MOV cs4, cx32y18;
+--:-:-:-:1      MOV cs5, cx33y18;
+--:-:-:-:1      MOV cs6, cx34y18;
+--:-:-:-:1      MOV cs7, cx35y18;
+--:-:-:-:5      CAL STORE_C;
+
+02:-:-:-:1      MOV cs0, cx00y19;
+--:-:-:-:1      MOV cs1, cx01y19;
+--:-:-:-:1      MOV cs2, cx02y19;
+--:-:-:-:1      MOV cs3, cx03y19;
+--:-:-:-:1      MOV cs4, cx32y19;
+--:-:-:-:1      MOV cs5, cx33y19;
+--:-:-:-:1      MOV cs6, cx34y19;
+--:-:-:-:1      MOV cs7, cx35y19;
+--:-:-:-:5      CAL STORE_C;
+
+--:-:-:-:5      EXIT;
+
+// This routine does warp synchronous shuffling of our output data so as to be able
+// to have coalesced writes to global memory.  This is actually faster because a
+// round trip to shared takes much less time than an extra store to global.
+// The SHFL instruction doesn't help us here because we're swaping different registers
+// from different threads.
+STORE_C:
+
+--:-:-:-:0      IADD cy00, cy00, 0x1;
+--:-:-:-:1      STS.128 [writeCs+0x000], cs0;
+--:-:-:-:0      IADD cy04, cy04, 0x1;
+--:-:-:-:1      STS.128 [writeCs+0x080], cs4;
+--:-:-:-:0      IADD cy08, cy08, 0x1;
+--:-:-:-:1      LDS cs0, [readCs + 0x000];
+--:-:-:-:0      IADD cy12, cy12, 0x1;
+--:-:-:-:1      LDS cs1, [readCs + 0x080];
+--:-:-:-:0      IADD Cy00, Cy00, ldc1;
+--:-:-:-:1      LDS cs2, [readCs + 0x200];
+--:-:-:-:0      IADD Cy04, Cy04, ldc1;
+--:-:-:-:1      LDS cs3, [readCs + 0x280];
+--:-:-:-:0      IADD Cy08, Cy08, ldc1;
+--:-:-:-:1      LDS cs4, [readCs + 0x400];
+--:-:-:-:0      IADD Cy12, Cy12, ldc1;
+--:-:-:-:1      LDS cs5, [readCs + 0x480];
+--:-:-:-:1      ISETP.LT.AND P0, PT, cy00, n, P5;
+--:-:-:-:1      LDS cs6, [readCs + 0x600];
+--:-:-:-:1      ISETP.LT.AND P1, PT, cy00, n, P6;
+--:-:1:-:1      LDS cs7, [readCs + 0x680];
+--:-:-:-:2      ISETP.LT.AND P2, PT, cy04, n, P5;
+--:-:-:Y:7      ISETP.LT.AND P3, PT, cy04, n, P6;
+01:-:-:-:1  @P0 STG.CG [Cy00 + 0x000], cs0;
+--:-:-:-:1      ISETP.LT.AND P0, PT, cy08, n, P5;
+--:-:-:-:1  @P1 STG.CG [Cy00 + 0x080], cs1;
+--:-:-:-:1      ISETP.LT.AND P1, PT, cy08, n, P6;
+--:-:-:-:1  @P2 STG.CG [Cy04 + 0x000], cs2;
+--:-:-:-:1      ISETP.LT.AND P2, PT, cy12, n, P5;
+--:-:-:-:1  @P3 STG.CG [Cy04 + 0x080], cs3;
+--:-:-:Y:7      ISETP.LT.AND P3, PT, cy12, n, P6;
+--:-:-:-:2  @P0 STG.CG [Cy08 + 0x000], cs4;
+--:-:-:-:2  @P1 STG.CG [Cy08 + 0x080], cs5;
+--:-:-:-:2  @P2 STG.CG [Cy12 + 0x000], cs6;
+--:2:-:-:1  @P3 STG.CG [Cy12 + 0x080], cs7;
+
+--:-:-:-:5      RET;
+
