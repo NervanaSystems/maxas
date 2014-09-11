@@ -2,7 +2,7 @@ package MaxAs;
 
 use strict;
 use Data::Dumper;
-use MaxAsGrammer;
+use MaxAsGrammar;
 
 require 5.10.0;
 
@@ -24,7 +24,9 @@ my %reuseSlots = (r8 => 1, r20 => 2, r39 => 4);
 # Preprocess and Assemble a source file
 sub Assemble
 {
-	my $file = Preprocess(shift, 1);
+	my ($file, $doReuse) = @_;
+
+	$file = Preprocess($file, 1);
 
 	# initialize cubin counts
 	my $regCnt = 0;
@@ -43,14 +45,8 @@ sub Assemble
 
 		next unless preProcessLine($line);
 
-		# match a label
-		if ($line =~ /^(\w+):\s*$/)
-		{
-			# map the label name to the index of the instruction about to be inserted
-			$labels{$1} = @instructs+0;
-		}
 		# match an instruction
-		elsif (my $inst = processAsmLine($line, $lineNum))
+		if (my $inst = processAsmLine($line, $lineNum))
 		{
 			# count the instructions for updating the cubin
 			$insCnt += 1 if $inst->{op} ne 'EXIT';
@@ -65,6 +61,12 @@ sub Assemble
 
 			# add a 4th control instruction for every 3 instructions
 			push @instructs, $ctrl = {} if ((@instructs & 3) == 0);
+		}
+		# match a label
+		elsif ($line =~ /^([a-zA-Z]\w*):/)
+		{
+			# map the label name to the index of the instruction about to be inserted
+			$labels{$1} = @instructs+0;
 		}
 		else
 		{
@@ -104,7 +106,7 @@ sub Assemble
 		my ($op, $inst) = @{$instructs[$i]}{qw(op inst)};
 
 		my $match = 0;
-		foreach my $gram (@{$grammer{$op}})
+		foreach my $gram (@{$grammar{$op}})
 		{
 			# Apply the rule pattern
 			next unless $inst =~ $gram->{rule};
@@ -143,47 +145,49 @@ sub Assemble
 			# We apply the reuse logic here since it's much easier than dealing with the disassembled code.
 			# There are 2 reuse slots per register slot
 			# The reuse hash points to most recent instruction index where register was last used in this slot
-
-			# For writes to a register, clear any reuse opportunity
-			if (@r0 && $r0[0] ne 'RZ' && !exists $noDest{$op})
+			if ($doReuse)
 			{
-				foreach my $slot (keys %reuseSlots)
+				# For writes to a register, clear any reuse opportunity
+				if (@r0 && $r0[0] ne 'RZ' && !exists $noDest{$op})
 				{
-					if (my $reuse = $reuse{$slot})
+					foreach my $slot (keys %reuseSlots)
 					{
-						# if writing with a vector op, clear all linked registers
-						delete $reuse->{$_} foreach @r0;
+						if (my $reuse = $reuse{$slot})
+						{
+							# if writing with a vector op, clear all linked registers
+							delete $reuse->{$_} foreach @r0;
+						}
 					}
 				}
-			}
 
-			# only track register reuse for instruction types this works with
-			if ($gram->{type}{reuse})
-			{
-				foreach my $slot (keys %reuseSlots)
+				# only track register reuse for instruction types this works with
+				if ($gram->{type}{reuse})
 				{
-					next unless exists $+{$slot};
-
-					my $r = $+{$slot};
-					next if $r eq 'RZ';
-					next if $r eq $+{r0}; # dont reuse if we're writing this reg in the same instruction
-
-					my $reuse = $reuse{$slot} ||= {};
-
-					# if this register was previously marked for potential reuse
-					if (my $p = $reuse->{$r})
+					foreach my $slot (keys %reuseSlots)
 					{
-						# flag the previous instruction
-						$instructs[$p]{reuse}{$slot}++;
+						next unless exists $+{$slot};
+
+						my $r = $+{$slot};
+						next if $r eq 'RZ';
+						next if $r eq $+{r0}; # dont reuse if we're writing this reg in the same instruction
+
+						my $reuse = $reuse{$slot} ||= {};
+
+						# if this register was previously marked for potential reuse
+						if (my $p = $reuse->{$r})
+						{
+							# flag the previous instruction
+							$instructs[$p]{reuse}{$slot}++;
+						}
+						# list full, delete the oldest
+						elsif (keys %$reuse > 2)
+						{
+							my $oldest = (sort {$reuse->{$a} <=> $reuse->{$b}} keys %$reuse)[0];
+							delete $reuse->{$oldest};
+						}
+						# mark the new instruction for potential reuse
+						$reuse->{$r} = $i;
 					}
-					# list full, delete the oldest
-					elsif (keys %$reuse > 2)
-					{
-						my $oldest = (sort {$reuse->{$a} <=> $reuse->{$b}} keys %$reuse)[0];
-						delete $reuse->{$oldest};
-					}
-					# mark the new instruction for potential reuse
-					$reuse->{$r} = $i;
 				}
 			}
 
@@ -200,27 +204,30 @@ sub Assemble
 		}
 		unless ($match)
 		{
-			print "$_->{rule}\n\n" foreach @{$grammer{$op}};
+			print "$_->{rule}\n\n" foreach @{$grammar{$op}};
 			die "Unable to encode instruction: $inst\n";
 		}
 	}
 
 	# Another pass to update reuse flags for control instructions
-	foreach my $i (0 .. $#instructs)
+	if ($doReuse)
 	{
-		if ($i & 3)
+		foreach my $i (0 .. $#instructs)
 		{
-			if (exists $instructs[$i]{reuse})
+			if ($i & 3)
 			{
-				my $reuse = 0;
-				$reuse |= $reuseSlots{$_} foreach keys %{$instructs[$i]{reuse}};
+				if (exists $instructs[$i]{reuse})
+				{
+					my $reuse = 0;
+					$reuse |= $reuseSlots{$_} foreach keys %{$instructs[$i]{reuse}};
 
-				# Overwrite parsed value
-				$ctrl->{reuse}[($i & 3) - 1] = $reuse;
+					# Overwrite parsed value
+					$ctrl->{reuse}[($i & 3) - 1] = $reuse;
+				}
 			}
+			else
+				{ $ctrl = $instructs[$i]; }
 		}
-		else
-			{ $ctrl = $instructs[$i]; }
 	}
 
 	# final pass to piece together control codes
@@ -249,25 +256,27 @@ sub Assemble
 	};
 }
 
-# Useful for testing op code coverage of existing code
+# Useful for testing op code coverage of existing code, extracting new codes and flags
 sub Test
 {
 	my $fh = shift;
 
+	my @instructs;
 	my ($pass, $fail) = (0,0);
 
 	while (my $line = <$fh>)
 	{
-		my (@ctrl, @ruse);
+		my (@ctrl, @reuse);
 
-		next unless processSassCtrlLine($line, \@ctrl, \@ruse);
+		next unless processSassCtrlLine($line, \@ctrl, \@reuse);
 
-		foreach my $fileReuse (@ruse)
+		foreach my $fileReuse (@reuse)
 		{
 			$line = <$fh>;
 
 			my $inst = processSassLine($line) or next;
 
+			$inst->{reuse} = $fileReuse;
 			my $fileCode = $inst->{code};
 
 			if (exists $relOffset{$inst->{op}})
@@ -277,58 +286,69 @@ sub Test
 			}
 
 			my $match = 0;
-			foreach my $gram (@{$grammer{$inst->{op}}})
+			foreach my $gram (@{$grammar{$inst->{op}}})
 			{
 				if ($inst->{inst} =~ $gram->{rule})
 				{
-					my ($code, $reuse) = genCode($gram);
+					my @caps;
+					my ($code, $reuse) = genCode($gram, \@caps);
+
+					$inst->{caps}      = join ', ', sort @caps;
+					$inst->{codeDiff}  = $fileCode  ^ $code;
+					$inst->{reuseDiff} = $fileReuse ^ $reuse;
 
 					# compare calculated and file values
-					my $grade = ($code == $fileCode && $reuse == $fileReuse) ? 'PASS' : 'FAIL';
-
-					printf "%s: 0x%016x %x %s\n", $grade, $fileCode, $fileReuse, $inst->{inst};
-					if ($grade eq 'FAIL')
+					if ($code == $fileCode && $reuse == $fileReuse)
 					{
-						my $diffc = $fileCode  ^ $code;
-						my $diffr = $fileReuse ^ $reuse;
-
-						printf "CALC: 0x%016x %x\nDIFF: 0x%016x %x\n\n", $code, $reuse, $diffc, $diffr;
-
-						$fail++;
-						if ($DEBUG)
-						{
-							print Dumper(prettyDump($gram));
-							exit;
-						}
+						$inst->{grade} = 'PASS';
+						$pass++;
 					}
 					else
-						{ $pass++; }
+					{
+						$inst->{grade} = 'FAIL';
+						$fail++;
+					}
+					push @instructs, $inst;
 
 					$match = 1;
 					last;
 				}
-				else
-				{
-					print $gram->{rule}, "\n"  if $DEBUG;
-				}
 			}
 			unless ($match)
 			{
-				printf "FAIL: 0x%016x %x %s\n", $fileCode, $fileReuse, $inst;
-
-				if ($DEBUG)
-				{
-					print Dumper(prettyDump($grammer{$inst->{op}}), prettyDump($flags{$inst->{op}}));
-					exit;
-				}
+				$inst->{grade}     = 'FAIL';
+				$inst->{codeDiff}  = $fileCode;
+				$inst->{reuseDiff} = $fileReuse;
+				$fail++;
 			}
 		}
 	}
-	print "Totals: Pass: $pass Fail: $fail\n";
+	my %maxLen;
+	foreach (@instructs)
+	{
+		$maxLen{$_->{op}} = length($_->{ins}) if length($_->{ins}) > $maxLen{$_->{op}};
+	}
+	my ($lastOp, $template);
+	foreach my $inst (sort {
+		$a->{op}        cmp $b->{op}        ||
+		$a->{codeDiff}  <=> $b->{codeDiff}  ||
+		$a->{reuseDiff} <=> $b->{reuseDiff} ||
+		$a->{ins}       cmp $b->{ins}
+		} @instructs)
+	{
+		if ($lastOp ne $inst->{op})
+		{
+			$lastOp   = $inst->{op};
+			$template = "%s 0x%016x %x 0x%016x %x %5s%-$maxLen{$lastOp}s   %s\n";
+			printf "\n%s %-18s %s %-18s %s %-5s%-$maxLen{$lastOp}s   %s\n", qw(Grad OpCode R opCodeDiff r Pred Instruction Captures);
+		}
+		printf $template, @{$inst}{qw(grade code reuse codeDiff reuseDiff pred ins caps)};
+	}
+	print "\nTotals: Pass: $pass Fail: $fail\n";
 	return $fail;
 }
 
-# Convert sass to the working format
+# Convert cuobjdump sass to the working format
 sub Extract
 {
 	my ($in, $out) = @_;
@@ -419,7 +439,9 @@ sub Preprocess
 			# skip comment lines
 			if ($line !~ /^\s*(?:#|\/\/)/ && $line !~ /^\s*$/)
 			{
-				$line =~ s/(\w+)/exists $regMap->{$1} ? $regMap->{$1} : $1/eg;
+				# Avoid replacing the c in a constant load..
+				# TODO: there are probably other annoying exceptions that needed to be added here.
+				$line =~ s/(\w+)(?!\s*\[)/exists $regMap->{$1} ? $regMap->{$1} : $1/eg;
 			}
 			$out .= "$line\n";
 		}
@@ -449,24 +471,28 @@ sub Scheduler
 
 	my $lineNum = 0;
 
-	my @instructs;
+	my (@instructs, @comments);
 	foreach my $line (split "\n", $block)
 	{
 		# keep track of line nums in the physical file
 		$lineNum++;
 
-		next unless preProcessLine($line);
-
-		# match a label
-		if ($line =~ /^(\w+):\s*$/)
+		unless (preProcessLine($line))
 		{
-			die "SCHEDULE_BLOCK's cannot contain labels. block: $blockNum line: $lineNum\n";
+			push @comments, $line if $line =~ /\S/;
+			next;
 		}
+
 		# match an instruction
-		elsif (my $inst = processAsmLine($line, $lineNum))
+		if (my $inst = processAsmLine($line, $lineNum))
 		{
 			$inst->{exeTime} = 0;
 			push @instructs, $inst;
+		}
+		# match a label
+		elsif ($line =~ /^([a-zA-Z]\w*):/)
+		{
+			die "SCHEDULE_BLOCK's cannot contain labels. block: $blockNum line: $lineNum\n";
 		}
 		else
 		{
@@ -479,7 +505,7 @@ sub Scheduler
 	foreach my $instruct (@instructs)
 	{
 		my $match = 0;
-		foreach my $gram (@{$grammer{$instruct->{op}}})
+		foreach my $gram (@{$grammar{$instruct->{op}}})
 		{
 			if ($instruct->{inst} =~ $gram->{rule})
 			{
@@ -676,10 +702,8 @@ sub Scheduler
 	}
 
 	my $out;
-	foreach my $instruct (@schedule)
-	{
-		$out .= sprintf "%s$instruct->{space}$instruct->{inst}\n", printCtrl($instruct->{ctrl});
-	}
+	$out .= "$_\n" foreach @comments;
+	$out .= join('', printCtrl($_->{ctrl}), @{$_}{qw(space inst comment)}, "\n") foreach @schedule;
 	return $out;
 }
 
@@ -690,7 +714,14 @@ sub getRegisterMap
 	my %regMap;
 	foreach my $line (split "\n", $regmapText)
 	{
-		next unless preProcessLine($line);
+		# strip leading space
+		$line =~ s/^\s+//;
+		# strip comments
+		$line =~ s/(?:#|\/\/).*//;
+		# strip trailing space
+		$line =~ s/\s+$//;
+		# skip blank lines
+		next unless $line =~ /\S/;
 
 		my ($regNums, $regNames) = split /\s*:\s*/, $line;
 
@@ -732,12 +763,13 @@ sub getRegisterMap
 my $CtrlRe = qr/(?<ctrl>[0-9a-fA-F\-]{2}:[1-6\-]:[1-6\-]:[\-yY]:[0-9a-fA-F])/;
 my $PredRe = qr/(?<pred>\@\!?(?<predReg>P\d)\s+)/;
 my $InstRe = qr/$PredRe?(?<op>\w+)(?<rest>[^;]*;)/o;
+my $CommRe = qr/(?<comment>.*)/;
 
 sub processAsmLine
 {
 	my ($line, $lineNum) = @_;
 
-	if ($line =~ /^$CtrlRe(?<space>\s+)$InstRe/o)
+	if ($line =~ /^$CtrlRe(?<space>\s+)$InstRe$CommRe/o)
 	{
 		return {
 			lineNum => $lineNum,
@@ -745,6 +777,7 @@ sub processAsmLine
 			predReg => $+{predReg},
 			space   => $+{space},
 			op      => $+{op},
+			comment => $+{comment},
 			inst    => normalizeSpacing($+{pred} . $+{op} . $+{rest}),
 			ctrl    => readCtrl($+{ctrl}, $line),
 		};
@@ -801,13 +834,13 @@ sub replaceXMADs
 	# XMAD.MRG x, a, b.H1, RZ;
 	# XMAD d, a, b, c;
 	# XMAD.PSL.CBCC d, a.H1, x.H1, d;
-	$file =~ s/\n$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>\w+)\s*,\s*(?<c>\w+)\s*,\s*(?<x>\w+)\s*;/
+	$file =~ s/\n$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>\w+)\s*,\s*(?<c>\w+)\s*,\s*(?<x>\w+)\s*;$CommRe/
 
 		sprintf '
-%1$s%2$s%3$sXMAD.MRG %8$s, %5$s, %6$s.H1, RZ;
+%1$s%2$s%3$sXMAD.MRG %8$s, %5$s, %6$s.H1, RZ;%9$s
 %1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;
 %1$s%2$s%3$sXMAD.PSL.CBCC %4$s, %5$s.H1, %8$s.H1, %4$s;',
-		@+{qw(ctrl space pred d a b c x)}
+		@+{qw(ctrl space pred d a b c x comment)}
 	/egmos;
 
 	#TODO: add more XMAD macros
@@ -874,13 +907,15 @@ sub preProcessLine
 {
 	# strip leading space
 	$_[0] =~ s/^\s+//;
+
+	# preserve comment but check for emptiness
+	my $val = shift;
+
 	# strip comments
-	$_[0] =~ s/(?:#|\/\/).*//;
-	# strip trailing space
-	$_[0] =~ s/\s+$//;
+	$val =~ s/(?:#|\/\/).*//;
 
 	# skip blank lines
-	return $_[0] =~ /\S/;
+	return $val =~ /\S/;
 }
 
 # traverse the graph and count total descendants per node.

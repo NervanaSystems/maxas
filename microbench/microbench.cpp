@@ -47,23 +47,45 @@ int main(int argc, char* argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	// First command line arg is the number of threads in multiples of 128
-	int thread128 = 1;
+	// First command line arg is the type: internal (CS2R) or external (cuEventElapsedTime) timing
+	int internalTiming = 1;
 	if (argc > 1)
-		thread128 = atoi(argv[1]);
+		internalTiming = strcmp(argv[1], "i") == 0 ? 1 : 0;
+
+	// Second command line arg is the number of blocks
+	int blocks = 1;
+	if (argc > 2)
+		blocks = atoi(argv[2]);
+	if (blocks > 10 || blocks < 1)
+		blocks = 1;
+
+	// Third command line arg is the number of threads in multiples of 128
+	int thread128 = 1;
+	if (argc > 3)
+		thread128 = atoi(argv[3]);
 	if (thread128 > 8 || thread128 < 1)
 		thread128 = 1;
 
-	// Second command line arg is the number of lanes to print for each warp
+	// Forth command line arg:
+	double fops = 1.0;
 	int lanes = 1;
-	if (argc > 2)
-		lanes = atoi(argv[2]);
-	if (lanes > 32 || lanes < 1)
-		lanes = 1;
+	if (argc > 4)
+	{
+		if (internalTiming)
+		{
+			// The number of lanes to print for each warp
+			lanes = atoi(argv[4]);
+			if (lanes > 32 || lanes < 1)
+				lanes = 1;
+		}
+		else
+			// The number of floating point operations in a full kernel launch
+			fops = atof(argv[4]);
+	}
 
 	// threads = total number of threads
 	int threads = thread128 * 128;
-	size_t size = sizeof(int) * threads;
+	size_t size = sizeof(int) * threads * blocks;
 
 	// Setup our input and output buffers
 	int* dataIn  = (int*)malloc(size);
@@ -73,6 +95,7 @@ int main(int argc, char* argv[])
 
 	CUmodule hModule;
 	CUfunction hKernel;
+	CUevent hStart, hStop;
 	CUdeviceptr devIn, devOut, devClocks;
 
 	// Init our context and device memory buffers
@@ -84,22 +107,37 @@ int main(int argc, char* argv[])
 	CUDA_CHECK( cuMemsetD8(devOut, 0, size) );
 	CUDA_CHECK( cuMemsetD8(devClocks, 0, size) );
 
+	CUDA_CHECK( cuEventCreate(&hStart, CU_EVENT_BLOCKING_SYNC) );
+	CUDA_CHECK( cuEventCreate(&hStop,  CU_EVENT_BLOCKING_SYNC) );
+
 	// Load our kernel
 	CUDA_CHECK( cuModuleLoad(&hModule, "microbench.cubin") );
 	CUDA_CHECK( cuModuleGetFunction(&hKernel, hModule, "microbench") );
 
 	// Setup the params
 	void* params[] = { &devOut, &devClocks, &devIn };
+	float ms = 0;
+
+	// Warm up the clock (unless under nsight)
+	if (!getenv("NSIGHT_LAUNCHED")) // NSIGHT_CUDA_ANALYSIS NSIGHT_CUDA_DEBUGGER 
+		CUDA_CHECK( cuLaunchKernel(hKernel, blocks, 1, 1, threads, 1, 1, 0, 0, params, 0) );
 
 	// Launch the kernel
-	CUDA_CHECK( cuLaunchKernel(hKernel, 1, 1, 1, threads, 1, 1, 0, 0, params, 0) );
-	CUDA_CHECK( cuCtxSynchronize() );
+	CUDA_CHECK( cuEventRecord(hStart, NULL) );
+	CUDA_CHECK( cuLaunchKernel(hKernel, blocks, 1, 1, threads, 1, 1, 0, 0, params, 0) );
+	CUDA_CHECK( cuEventRecord(hStop, NULL) );
+	CUDA_CHECK( cuEventSynchronize(hStop) );
+	CUDA_CHECK( cuEventElapsedTime(&ms, hStart, hStop) );
+	
+	//CUDA_CHECK( cuCtxSynchronize() );
 
 	// Get back our results from each kernel
 	CUDA_CHECK( cuMemcpyDtoH(dataOut, devOut, size) );
 	CUDA_CHECK( cuMemcpyDtoH(clocks, devClocks, size) );
 
 	// Cleanup and shutdown of cuda
+	CUDA_CHECK( cuEventDestroy(hStart) );
+	CUDA_CHECK( cuEventDestroy(hStop) );
 	CUDA_CHECK( cuModuleUnload(hModule) );
 	CUDA_CHECK( cuMemFree(devIn) );
 	CUDA_CHECK( cuMemFree(devOut) );
@@ -107,21 +145,40 @@ int main(int argc, char* argv[])
 	CUDA_CHECK( cuCtxDestroy(hContext) );
 	hContext = 0;
 
-	// Loop over and print results
-	int count = 0, total = 0, min = 999999, max = 0;
-	for(int tid = 0; tid < threads; tid += 32)
+	// When using just one block, print out the internal timing data
+	if (internalTiming)
 	{
-		// Sometimes we want data on each thread, sometimes just one sample per warp is fine
-		for (int lane = 0; lane < lanes; lane++)
-			printf("w:%03d t:%04d l:%02d clocks:%04u out:%04u\n", tid/32, tid, lane, clocks[tid+lane], dataOut[tid+lane]);
+		int count = 0, total = 0, min = 999999, max = 0;
+		
+		int* clocks_p  = clocks;
+		int* dataOut_p = dataOut;
+		
+		// Loop over and print results
+		for (int blk = 0; blk < blocks; blk++)
+		{
+			float *fDataOut = reinterpret_cast<float*>(dataOut_p);
 
-		count++;
-		total += clocks[tid];
-		if (clocks[tid] < min) min = clocks[tid];
-		if (clocks[tid] > max) max = clocks[tid];
+			for(int tid = 0; tid < threads; tid += 32)
+			{
+				// Sometimes we want data on each thread, sometimes just one sample per warp is fine
+				for (int lane = 0; lane < lanes; lane++)
+					printf("b:%02d w:%03d t:%04d l:%02d clocks:%04u out:0x%08x\n", blk, tid/32, tid, lane, clocks_p[tid+lane], dataOut_p[tid+lane]); //
+
+				count++;
+				total += clocks_p[tid];
+				if (clocks_p[tid] < min) min = clocks_p[tid];
+				if (clocks_p[tid] > max) max = clocks_p[tid];
+			}
+			clocks_p  += threads;
+			dataOut_p += threads;
+		}
+		printf("average: %.3f, min %d, max: %d\n", (float)total/count, min, max);
 	}
-	printf("average: %.3f, min %d, max: %d\n", (float)total/count, min, max);
-
+	else
+	{
+		// For more than one block we're testing throughput and want external timing data
+		printf("MilliSecs: %.3f, GFLOPS: %.3f\n", ms, fops / (ms * 1000000.0));
+	}
 	// And free up host memory
 	free(dataIn); free(dataOut); free(clocks);
 

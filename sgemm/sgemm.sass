@@ -18,8 +18,8 @@
 <REGISTER_MAPPING>
 
 	// 64 maxtrix C output registers.
-	// Use special mapping to improve register bank bandwidth.
-	// This alone improves performance by about 200 GFlops on GM107.
+	// Use special mapping to avoid register bank conflicts.
+	// Avoid combining any source register in an FFMA that has the same (regNum % 4) value
 	 3, 2,11,10,19,18,27,26 : cx00y<00-03|16-19>
 	 7, 6,15,14,23,22,31,30 : cx01y<00-03|16-19>
 	 1, 0, 9, 8,17,16,25,24 : cx02y<00-03|16-19>
@@ -29,11 +29,12 @@
 	33,32,41,40,49,48,57,56 : cx34y<00-03|16-19>
 	37,36,45,44,53,52,61,60 : cx35y<00-03|16-19>
 
-	// You can try this naive combination to see the difference.
-	// 0-31 : cx00y<00-03|16-19>, cx01y<00-03|16-19>, cx02y<00-03|16-19>, cx03y<00-03|16-19>,
+	// You can try this naive combination to see the difference (200 GFlops on GM107).
+	// 0-31 : cx00y<00-03|16-19>, cx01y<00-03|16-19>, cx02y<00-03|16-19>, cx03y<00-03|16-19>
 	//32-63 : cx32y<00-03|16-19>, cx33y<00-03|16-19>, cx34y<00-03|16-19>, cx35y<00-03|16-19>
 
 	// Double buffered register blocking
+	// Any bank conflicts that we can't avoid in these registers we can hide with .reuse flags
 	64-79   : j0Ax<00-03|32-35>, j0By<00-03|16-19>
 	80-95   : j1Ax<00-03|32-35>, j1By<00-03|16-19>
 
@@ -106,7 +107,7 @@
 --:-:-:-:1      SHL    writeS, writeS, 0x2;
 --:-:-:-:1  @P0 IADD   writeS, writeS, 0x1000;
 
-// readAs and readBs are carefully contructed to avoid any bank conflicts while loading from shared
+// readAs and readBs are carefully constructed to avoid any bank conflicts while loading from shared
 // readAs = (((tid >> 1) & 7) | ((tid >> 7) << 4)) << 4;
 --:-:-:-:1      BFE.U32 val0,   tid,    0x301;
 --:-:-:-:1      SHR.U32 readAs, tid,    0x7;
@@ -140,21 +141,21 @@
 </SCHEDULE_BLOCK>
 
 // Increment tracks after the loads are complete to avoid needing write-after-read dependencies
-02:-:-:-:1      STS [writeS + 0x000], loadX0; // Wait Dep 2
---:-:-:-:0      IADD track0, track0, ldx8;    // Dual Issue
---:-:-:-:1      STS [writeS + 0x080], loadX1;
+02:-:-:-:1      STS [writeS + 4x<000 + 00>], loadX0; // Wait Dep 2
+--:-:-:-:0      IADD track0, track0, ldx8;           // Dual Issue
+--:-:-:-:1      STS [writeS + 4x<000 + 32>], loadX1;
 --:-:-:-:0      IADD track1, track1, ldx8;
---:-:-:-:1      STS [writeS + 0x100], loadX2;
+--:-:-:-:1      STS [writeS + 4x<000 + 64>], loadX2;
 --:-:-:-:0      IADD track2, track2, ldx8;
---:-:-:-:1      STS [writeS + 0x180], loadX3;
+--:-:-:-:1      STS [writeS + 4x<000 + 96>], loadX3;
 --:-:-:-:0      IADD track3, track3, ldx8;
---:-:-:-:1      STS [writeS + 0x800], loadX4;
+--:-:-:-:1      STS [writeS + 4x<512 + 00>], loadX4;
 --:-:-:-:0      IADD track4, track4, ldx8;
---:-:-:-:1      STS [writeS + 0x880], loadX5;
+--:-:-:-:1      STS [writeS + 4x<512 + 32>], loadX5;
 --:-:-:-:0      IADD track5, track5, ldx8;
---:-:-:-:1      STS [writeS + 0x900], loadX6;
+--:-:-:-:1      STS [writeS + 4x<512 + 64>], loadX6;
 --:-:-:-:0      IADD track6, track6, ldx8;
---:-:-:-:1      STS [writeS + 0x980], loadX7;
+--:-:-:-:1      STS [writeS + 4x<512 + 96>], loadX7;
 --:-:-:-:0      IADD track7, track7, ldx8;
 
 // Wait for all threads to finish loading shared
@@ -163,7 +164,7 @@
 // Next write to shared goes to high area.
 // Having 2 share buffers allows us to eliminate a bar.sync in the main loop
 // Must go after BAR.SYNC to avoid needing WaR dep
---:-:-:-:1      LOP.XOR writeS, writeS, 0x2000;
+--:-:-:-:1      LOP.XOR writeS, writeS, 4x<2048>;
 
 // Preload the fist lines of A and B from shared
 // Initialize C registeres to zero
@@ -172,7 +173,7 @@
 
 	# We want a very specific ordering of operations to maximize register reuse
 	our @cOrder = qw(
-		x00y00 x02y00 x00y01 x02y01 x01y00 x03y00 x01y01 x03y01
+		x02y00 x00y00 x00y01 x02y01 x01y00 x03y00 x01y01 x03y01
 		x32y00 x34y00 x32y01 x34y01 x33y00 x35y00 x33y01 x35y01
 		x33y02 x35y02 x33y03 x35y03 x32y02 x34y02 x32y03 x34y03
 		x01y02 x03y02 x01y03 x03y03 x00y02 x02y02 x00y03 x02y03
@@ -194,10 +195,10 @@
 
 	my %insert =
 	(
-		0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 0x00];',
-		2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 0x00];',
-		4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 0x80];',
-		6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 0x40]; // Set Dep 1',
+		0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<0*128 + 00>];',
+		2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 4x<0*128 + 00>];',
+		4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 4x<0*128 + 32>];',
+		6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 4x<0*128 + 16>]; // Set Dep 1',
 	);
 
 	my $out;
@@ -241,10 +242,10 @@ LOOP:
 
 	my %insert =
 	(
-		j0c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 0x200];',
-		j0c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 0x200];',
-		j0c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 0x280];',
-		j0c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 0x240]; // Set Dep 1',
+		j0c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 4x<1*128 + 00>];',
+		j0c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 4x<1*128 + 00>];',
+		j0c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 4x<1*128 + 32>];',
+		j0c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 4x<1*128 + 16>]; // Set Dep 1',
 
 		# Don't start before 12 to let ISETP to write P0
 		j0c29 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;',
@@ -252,68 +253,68 @@ LOOP:
 		j0c33 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX2, track2, tex, 0x0, 1D, 0x1;',
 		j0c35 => '--:-:2:-:1  @P0 TLD.B.LZ.P loadX3, track3, tex, 0x0, 1D, 0x1; // Set Dep 2',
 
-		j1c0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 0x400];',
-		j1c2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 0x400];',
-		j1c4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 0x480];',
-		j1c6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 0x440]; // Set Dep 1',
+		j1c0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<2*128 + 00>];',
+		j1c2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 4x<2*128 + 00>];',
+		j1c4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 4x<2*128 + 32>];',
+		j1c6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 4x<2*128 + 16>]; // Set Dep 1',
 
 		j1c29 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX4, track4, tex, 0x0, 1D, 0x1;',
 		j1c31 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX5, track5, tex, 0x0, 1D, 0x1;',
 		j1c33 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX6, track6, tex, 0x0, 1D, 0x1;',
 		j1c35 => '--:-:3:-:1  @P0 TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1; // Set Dep 3',
 
-		j2c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 0x600];',
-		j2c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 0x600];',
-		j2c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 0x680];',
-		j2c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 0x640]; // Set Dep 1',
+		j2c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 4x<3*128 + 00>];',
+		j2c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 4x<3*128 + 00>];',
+		j2c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 4x<3*128 + 32>];',
+		j2c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 4x<3*128 + 16>]; // Set Dep 1',
 
-		j3c0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 0x800];',
-		j3c2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 0x800];',
-		j3c4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 0x880];',
-		j3c6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 0x840]; // Set Dep 1',
+		j3c0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<4*128 + 00>];',
+		j3c2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 4x<4*128 + 00>];',
+		j3c4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 4x<4*128 + 32>];',
+		j3c6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 4x<4*128 + 16>]; // Set Dep 1',
 
-		j4c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 0xa00];',
-		j4c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 0xa00];',
-		j4c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 0xa80];',
-		j4c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 0xa40]; // Set Dep 1',
+		j4c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 4x<5*128 + 00>];',
+		j4c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 4x<5*128 + 00>];',
+		j4c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 4x<5*128 + 32>];',
+		j4c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 4x<5*128 + 16>]; // Set Dep 1',
 
-		j5c0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 0xc00];',
-		j5c2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 0xc00];',
-		j5c4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 0xc80];',
-		j5c6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 0xc40]; // Set Dep 1',
+		j5c0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<6*128 + 00>];',
+		j5c2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 4x<6*128 + 00>];',
+		j5c4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 4x<6*128 + 32>];',
+		j5c6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 4x<6*128 + 16>]; // Set Dep 1',
 
-		j5c29 => '02:-:-:-:1  @P0 STS [writeS + 0x000], loadX0;       // Wait Dep 2',
-		j5c31 => '--:-:-:-:1  @P0 STS [writeS + 0x080], loadX1;',
-		j5c33 => '--:-:-:-:1  @P0 STS [writeS + 0x100], loadX2;',
-		j5c35 => '--:-:-:-:1  @P0 STS [writeS + 0x180], loadX3;',
+		j5c29 => '02:-:-:-:1  @P0 STS [writeS + 4x<000 + 00>], loadX0;       // Wait Dep 2',
+		j5c31 => '--:-:-:-:1  @P0 STS [writeS + 4x<000 + 32>], loadX1;',
+		j5c33 => '--:-:-:-:1  @P0 STS [writeS + 4x<000 + 64>], loadX2;',
+		j5c35 => '--:-:-:-:1  @P0 STS [writeS + 4x<000 + 96>], loadX3;',
 
-		j6c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 0xe00];',
-		j6c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 0xe00];',
-		j6c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 0xe80];',
-		j6c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 0xe40]; // Set Dep 1',
+		j6c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 4x<7*128 + 00>];',
+		j6c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 4x<7*128 + 00>];',
+		j6c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 4x<7*128 + 32>];',
+		j6c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 4x<7*128 + 16>]; // Set Dep 1',
 
-		j6c29 => '04:-:-:-:1  @P0 STS [writeS + 0x800], loadX4;       // Wait Dep 3',
-		j6c31 => '--:-:-:-:1  @P0 STS [writeS + 0x880], loadX5;',
-		j6c33 => '--:-:-:-:1  @P0 STS [writeS + 0x900], loadX6;',
-		j6c35 => '--:-:-:-:1  @P0 STS [writeS + 0x980], loadX7;',
+		j6c29 => '04:-:-:-:1  @P0 STS [writeS + 4x<512 + 00>], loadX4;       // Wait Dep 3',
+		j6c31 => '--:-:-:-:1  @P0 STS [writeS + 4x<512 + 32>], loadX5;',
+		j6c33 => '--:-:-:-:1  @P0 STS [writeS + 4x<512 + 64>], loadX6;',
+		j6c35 => '--:-:-:-:1  @P0 STS [writeS + 4x<512 + 96>], loadX7;',
 
 		# We need one barrier in the main loop after writing shared memory.
 		j6c59 => '--:-:-:-:5  @P0 BAR.SYNC 0x0;',
 
 		# Swap our share buffer location.  We don't need an additional barrier because of these swaps.
 		# Note, this doubles our shared memory usage but this kernel's occupancy is entirely bound by registers.
-		j6c60 => '--:-:-:-:1  @P0 LOP.XOR readAs, readAs, 0x2000;',
-		j6c61 => '--:-:-:-:1  @P0 LOP.XOR readBs, readBs, 0x2000;',
-		j6c62 => '--:-:-:-:1  @P0 LOP.XOR writeS, writeS, 0x2000;',
+		j6c60 => '--:-:-:-:1  @P0 LOP.XOR readAs, readAs, 4x<2048>;',
+		j6c61 => '--:-:-:-:1  @P0 LOP.XOR readBs, readBs, 4x<2048>;',
+		j6c62 => '--:-:-:-:1  @P0 LOP.XOR writeS, writeS, 4x<2048>;',
 
-		j7c0  => '--:-:-:-:1  @P0 LDS.U.128 j0Ax00, [readAs + 0x000];',
-		j7c2  => '--:-:-:-:1  @P0 LDS.U.128 j0By00, [readBs + 0x000];',
-		j7c4  => '--:-:-:-:1  @P0 LDS.U.128 j0Ax32, [readAs + 0x080];',
-		j7c6  => '--:-:1:-:1  @P0 LDS.U.128 j0By16, [readBs + 0x040]; // Set Dep 1',
+		j7c0  => '--:-:-:-:1  @P0 LDS.U.128 j0Ax00, [readAs + 4x<0*128 + 00>];',
+		j7c2  => '--:-:-:-:1  @P0 LDS.U.128 j0By00, [readBs + 4x<0*128 + 00>];',
+		j7c4  => '--:-:-:-:1  @P0 LDS.U.128 j0Ax32, [readAs + 4x<0*128 + 32>];',
+		j7c6  => '--:-:1:-:1  @P0 LDS.U.128 j0By16, [readBs + 4x<0*128 + 16>]; // Set Dep 1',
 
 		# Note having 8 IADDs slightly hits our FFMA performance, but TLD doesn't take an offset.
 		# LDG.CI doesn't have this issue, but doesn't give you the nice features of texture loads:
-		#   -Boundry clamping:  simplifies out matrix load logic so we don't need to worry about loading out of bounds
+		#   -Boundry clamping:  simplifies our matrix load logic so we don't need to worry about loading out of bounds
 		#   -Normalized floats: if we don't need full 32 bits of precision we could store our matrices using 16 or 8 bit values
 		j7c47 => '--:-:-:-:1  @P0 IADD track0, track0, ldx8;',
 		j7c49 => '--:-:-:-:1  @P0 IADD track1, track1, ldx8;',
@@ -452,7 +453,7 @@ LOOP:
 	my $out;
 	foreach my $y (0..3, 16..19)
 	{
-		my $wait = $y ? '02' : '--';
+		my ($wait, $comment) = $y ? ('02',' // Wait Dep 2') : ('--','');
 		if ($y == 16)
 		{
 			$out .= q|
@@ -461,17 +462,18 @@ LOOP:
 --:-:-:-:1      IADD cy08, cy08, 0xc;
 --:-:-:-:1      IADD cy12, cy12, 0xc;
 
-02:-:-:-:1      IADD Cy00, Cy00, ldc12;
+02:-:-:-:1      IADD Cy00, Cy00, ldc12; // Wait Dep 2
 --:-:-:-:1      IADD Cy04, Cy04, ldc12;
 --:-:-:-:1      IADD Cy08, Cy08, ldc12;
 --:-:-:-:1      IADD Cy12, Cy12, ldc12;
 |;
 			$wait = '--';
+			$comment = '';
 		}
 		# We need to move the C values to the param registers of the STORE_C subroutine.
 		# Note that these could be FMUL's instead of MOV's if we wanted to multiply the output by alpha.
 		$out .= sprintf q|
-%s:-:-:-:1      MOV cs0, cx00y%02d;
+%s:-:-:-:1      MOV cs0, cx00y%02d;%s
 --:-:-:-:1      MOV cs1, cx01y%02d;
 --:-:-:-:1      MOV cs2, cx02y%02d;
 --:-:-:-:1      MOV cs3, cx03y%02d;
@@ -480,7 +482,7 @@ LOOP:
 --:-:-:-:1      MOV cs6, cx34y%02d;
 --:-:-:-:1      MOV cs7, cx35y%02d;
 --:-:-:-:5      CAL STORE_C;
-|, $wait, ($y) x 8;
+|, $wait, $y, $comment, ($y) x 7;
 
 	}
 	return $out;
@@ -501,19 +503,19 @@ STORE_C:
 // Each warp writes to its own region of memory so we don't need to bar.sync the access.
 // There are some bank conflicts here but no way to avoid them, and the hit just means a few extra clocks.
 // Note here that the scheduler is able to handle the dependencies between vector and non-vector instructions.
-// It knows from the register map that cs0 here includes cs1, cs2 and cs3 as well.
---:-:-:-:1      STS.128 [writeCs+0x000], cs0;
---:-:-:-:1      STS.128 [writeCs+0x080], cs4;
+// It knows from the instruction type and the register map that cs0 here includes cs1, cs2 and cs3 as well.
+--:-:-:-:1      STS.128 [writeCs+4x<00>], cs0;
+--:-:-:-:1      STS.128 [writeCs+4x<32>], cs4;
 
 // Loads naturally occur after the store to shared completes, no sync required.
---:-:-:-:1      LDS cs0, [readCs + 0x000];
---:-:-:-:1      LDS cs1, [readCs + 0x080];
---:-:-:-:1      LDS cs2, [readCs + 0x200];
---:-:-:-:1      LDS cs3, [readCs + 0x280];
---:-:-:-:1      LDS cs4, [readCs + 0x400];
---:-:-:-:1      LDS cs5, [readCs + 0x480];
---:-:-:-:1      LDS cs6, [readCs + 0x600];
---:-:1:-:1      LDS cs7, [readCs + 0x680]; // Set Dep 1
+--:-:-:-:1      LDS cs0, [readCs + 4x<0*128 + 00>];
+--:-:-:-:1      LDS cs1, [readCs + 4x<0*128 + 32>];
+--:-:-:-:1      LDS cs2, [readCs + 4x<1*128 + 00>];
+--:-:-:-:1      LDS cs3, [readCs + 4x<1*128 + 32>];
+--:-:-:-:1      LDS cs4, [readCs + 4x<2*128 + 00>];
+--:-:-:-:1      LDS cs5, [readCs + 4x<2*128 + 32>];
+--:-:-:-:1      LDS cs6, [readCs + 4x<3*128 + 00>];
+--:-:1:-:1      LDS cs7, [readCs + 4x<3*128 + 32>]; // Set Dep 1
 
 --:-:-:-:1      IADD cy00, cy00, 0x1;
 --:-:-:-:1      IADD cy04, cy04, 0x1;
@@ -530,20 +532,20 @@ STORE_C:
 --:-:-:-:1      ISETP.LT.AND P2, PT, cy04, n, P5;
 --:-:-:-:1      ISETP.LT.AND P3, PT, cy04, n, P6;
 
-01:-:-:-:1  @P0 STG.CG [Cy00 + 0x000], cs0; // Wait Dep 1
---:-:-:-:1  @P1 STG.CG [Cy00 + 0x080], cs1;
---:-:-:-:1  @P2 STG.CG [Cy04 + 0x000], cs2;
---:-:-:-:1  @P3 STG.CG [Cy04 + 0x080], cs3;
+01:-:-:-:1  @P0 STG.CG [Cy00 + 4x<00>], cs0; // Wait Dep 1
+--:-:-:-:1  @P1 STG.CG [Cy00 + 4x<32>], cs1;
+--:-:-:-:1  @P2 STG.CG [Cy04 + 4x<00>], cs2;
+--:-:-:-:1  @P3 STG.CG [Cy04 + 4x<32>], cs3;
 
 --:-:-:-:1      ISETP.LT.AND P0, PT, cy08, n, P5;
 --:-:-:-:1      ISETP.LT.AND P1, PT, cy08, n, P6;
 --:-:-:-:1      ISETP.LT.AND P2, PT, cy12, n, P5;
 --:-:-:-:1      ISETP.LT.AND P3, PT, cy12, n, P6;
 
---:-:-:-:1  @P0 STG.CG [Cy08 + 0x000], cs4;
---:-:-:-:1  @P1 STG.CG [Cy08 + 0x080], cs5;
---:-:-:-:1  @P2 STG.CG [Cy12 + 0x000], cs6;
---:2:-:-:1  @P3 STG.CG [Cy12 + 0x080], cs7; // Set Dep 2
+--:-:-:-:1  @P0 STG.CG [Cy08 + 4x<00>], cs4;
+--:-:-:-:1  @P1 STG.CG [Cy08 + 4x<32>], cs5;
+--:-:-:-:1  @P2 STG.CG [Cy12 + 4x<00>], cs6;
+--:2:-:-:1  @P3 STG.CG [Cy12 + 4x<32>], cs7; // Set Dep 2
 
 </SCHEDULE_BLOCK>
 

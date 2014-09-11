@@ -13,44 +13,49 @@
 
 <REGISTER_MAPPING>
 
-	0-20 : out, clocks, in, tid, clock1, clock2, result
+	0-20 : out, clocks, in, tid, bid, blockDim, clock1, clock2, result, x
 
 </REGISTER_MAPPING>
 
 // Load in our params
---:-:-:-:1      MOV out,    c[0x0][0x140];
---:-:-:-:1      MOV clocks, c[0x0][0x144];
---:-:-:-:1      MOV in,     c[0x0][0x148];
+--:-:-:-:1      MOV out,      c[0x0][0x140];
+--:-:-:-:1      MOV clocks,   c[0x0][0x144];
+--:-:-:-:1      MOV in,       c[0x0][0x148];
+--:-:-:-:1      MOV blockDim, c[0x0][0x8];
 
 // Get the first clock value
 --:-:-:-:1      CS2R clock1, SR_CLOCKLO;
 
-// Get the threadId,
-// Set the Read-After-Write dependency barrier 1
+// Get the threadId and blockId
+// Set the Read-After-Write dependency barrier 1 and 2
+--:-:1:-:1      S2R tid, SR_TID.X;
 // Add one additional clock stall to allow the barrier time to set prior to next instruction that uses it
---:-:1:-:2      S2R tid,   SR_TID.X;
+--:-:2:-:2      S2R bid, SR_CTAID.X;
+
 
 // Get the second clock value
-// Wait on the depenedency barrier that was set in the prior instruction
+// Wait on the depenedency barriers that were set in the prior instruction
 // Stall 6 to allow CS2R time to complete before next instruction
 // CS2R takes a constant 6 clocks to complete unlike S2R which is a variable 22-44 clocks
 // This stall count does not factor into the time calculation at all
-01:-:-:-:6      CS2R clock2, SR_CLOCKLO;
+03:-:-:-:6      CS2R clock2, SR_CLOCKLO;
 
 // Take the difference of clocks
 --:-:-:-:1      IADD clock1, clock2, -clock1;
-// Put some random data on our output register
---:-:-:-:1      MOV32I result, 0x457;
 
 // Setup our output addresses
-// Stall tid*4 by 6 clocks to allow 6 clock pipeline instuction time to complete
---:-:-:-:6      SHL  tid, tid, 0x2;
+// Stall your pipeline dependencies properly
+03:-:-:-:1      XMAD tid, blockDim, bid, tid;
+--:-:-:Y:6      XMAD.MRG x, blockDim, bid.H1, RZ;
+--:-:-:Y:6      XMAD.PSL.CBCC tid, blockDim.H1, x.H1, tid;
+--:-:-:Y:6      SHL  tid, tid, 0x2;
+
 --:-:-:-:1      IADD clocks, clocks, tid;
 --:-:-:-:1      IADD out,  out,  tid;
 
 // Output the results.
 // No stall needed on prior instruction as memory store instructions have a 5 clock delay in picking up register values
 --:-:-:-:1      STG [clocks], clock1;
---:-:-:-:1      STG [out],    result;
+--:-:-:-:1      STG [out],    tid;
 --:-:-:-:5      EXIT;
 

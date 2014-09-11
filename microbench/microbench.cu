@@ -14,10 +14,11 @@ extern "C" __global__ void  microbench(int *out, int *clocks, int *in)
 	__shared__ int share[1024];
 
 	int tid = threadIdx.x;
+	int blkdim = blockDim.x;
 
 	int start = clock(); 
 
-	share[tid] = in[tid];
+	share[tid] = in[tid + blkdim];
 
 	__syncthreads();
 

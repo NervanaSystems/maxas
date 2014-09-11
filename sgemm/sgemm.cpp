@@ -119,12 +119,13 @@ int main(int argc, char* argv[])
 	CUDA_CHECK( cuMemsetD8(devC, 0, size) );
 	CUDA_CHECK( cuMemsetD8(devT, 0, size) );
 	
-	// First execution might not run at full clock, so warm it up
-	CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
+	// Warm up the clock (unless under nsight)
+	if (!getenv("NSIGHT_LAUNCHED")) // NSIGHT_CUDA_ANALYSIS NSIGHT_CUDA_DEBUGGER 
+		CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
 
 	// Launch our kernel
 	ms = assemblySgemm(devC, devA, devB, N, hStart, hStop, repeat, printVars);
-	gflops("MaxAs", N, ms, repeat);
+	gflops("MaxAs ", N, ms, repeat);
 
 	// Run cublas again for the same repeat count for comparison
 	CUDA_CHECK( cuEventRecord(hStart, NULL) );
