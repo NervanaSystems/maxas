@@ -30,6 +30,7 @@ if ($mode =~ /^\-?\-l/i)
 # Test that the assembler can reproduce the op codes this cubin or sass contains
 elsif ($mode =~ /^\-?\-t/i)
 {
+    my $all  = shift if $ARGV[0] =~ /^\-?\-a/i;
     my $file = shift or usage();
     my $fh;
     # sass file
@@ -48,7 +49,7 @@ elsif ($mode =~ /^\-?\-t/i)
             exit(1);
         }
     }
-    exit(MaxAs::Test($fh) ? 1 : 0);
+    exit(MaxAs::Test($fh, $all) ? 1 : 0);
 }
 # Extract an asm file containing the desired kernel
 elsif ($mode =~ /^\-?\-e/i)
@@ -176,9 +177,9 @@ Usage:
     maxas.pl --list|-l <cubin_file>
 
   Test a cubin or sass file to to see if the assembler can reproduce all of the contained opcodes.
-  Also useful for extending the missing grammar rules:
+  Also useful for extending the missing grammar rules.  Defaults to only showing failures:
 
-    maxas.pl --test|-t <cubin_file | sass_file>
+    maxas.pl --test|-t [--all|-a] <cubin_file | sass_file>
 
   Extract a single kernel into an asm file from a cubin.
   Works much like cuobjdump but outputs in a format that can be re-assembled back into the cubin:

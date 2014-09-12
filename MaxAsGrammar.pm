@@ -17,7 +17,7 @@ sub getI
     my $neg = $val =~ s/^\-//;
 
     # parse out our custom index immediates for addresses
-    if ($val  =~ /^(\d+)[xX]<([^>]+)>/)
+    if ($val  =~ m'^(\d+)[xX]<([^>]+)>')
     {
         $val = $1 * eval $2;
     }
@@ -41,7 +41,7 @@ sub getF
 {
     my ($val, $pos, $type, $trunc) = @_;
     # support infinity
-    if ($val =~ /INF/i)
+    if ($val =~ m'INF'i)
     {
         $val = $trunc ? ($type eq 'f' ? 0x7f800 : 0x7ff00) : 0x7f800000;
     }
@@ -57,7 +57,7 @@ sub getF
 sub getR
 {
     my ($val, $pos) = @_;
-    if ($val =~ /^R(\d+|Z)$/ && $1 < 255)
+    if ($val =~ m'^R(\d+|Z)$' && $1 < 255)
     {
         $val = $1 eq 'Z' ? 0xff : $1;
     }
@@ -70,7 +70,7 @@ sub getR
 sub getP
 {
     my ($val, $pos) = @_;
-    if ($val =~ /^P(\d|T)$/ && $1 < 7)
+    if ($val =~ m'^P(\d|T)$' && $1 < 7)
     {
         $val = $1 eq 'T' ? 7 : $1;
     }

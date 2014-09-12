@@ -259,7 +259,7 @@ sub Assemble
 # Useful for testing op code coverage of existing code, extracting new codes and flags
 sub Test
 {
-    my $fh = shift;
+    my ($fh, $all) = @_;
 
     my @instructs;
     my ($pass, $fail) = (0,0);
@@ -301,14 +301,16 @@ sub Test
                     if ($code == $fileCode && $reuse == $fileReuse)
                     {
                         $inst->{grade} = 'PASS';
+                        push @instructs, $inst if $all;
                         $pass++;
                     }
                     else
                     {
                         $inst->{grade} = 'FAIL';
+                        push @instructs, $inst;
                         $fail++;
                     }
-                    push @instructs, $inst;
+
 
                     $match = 1;
                     last;
