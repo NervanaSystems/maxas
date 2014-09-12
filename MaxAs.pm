@@ -719,7 +719,7 @@ sub getRegisterMap
         # strip leading space
         $line =~ s|^\s+||;
         # strip comments
-        $line =~ s|(?:#|//).*||;
+        $line =~ s{(?:#|//).*}{};
         # strip trailing space
         $line =~ s|\s+$||;
         # skip blank lines
@@ -914,7 +914,7 @@ sub preProcessLine
     my $val = shift;
 
     # strip comments
-    $val =~ s|(?:#|//).*||;
+    $val =~ s{(?:#|//).*}{};
 
     # skip blank lines
     return $val =~ m'\S';
