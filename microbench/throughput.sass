@@ -4,14 +4,14 @@
 # SharedSize: 4096
 # BarCnt: 1
 # Params(3):
-#	ord:addr:size:align
-#	0:0x140:4:0
-#	1:0x144:4:0
-#	2:0x148:4:0
+#   ord:addr:size:align
+#   0:0x140:4:0
+#   1:0x144:4:0
+#   2:0x148:4:0
 
 <REGISTER_MAPPING>
 
-	8-20 : count
+    8-20 : count
 
 </REGISTER_MAPPING>
 
@@ -35,16 +35,16 @@ LOOP:
 --:-:-:-:1      IADD count, count, 0x1;
 
 <CODE>
-	my $out;
+    my $out;
 
-	foreach my $i (0..511)
-	{
-		my $y = ($i + 32) & 63 ? '-' : 'Y';
+    foreach my $i (0..511)
+    {
+        my $y = ($i + 32) & 63 ? '-' : 'Y';
 
-		$out .= qq|
+        $out .= qq|
 --:-:-:$y:1      FFMA R0, R0, R1, R2;|;
-	}
-	return $out;
+    }
+    return $out;
 </CODE>
 
 --:-:-:Y:5  @P0 BRA LOOP;
@@ -54,12 +54,12 @@ LOOP:
 <COMMENT>
 
 
-	open my $fh, 'params.txt';
-	my $line = <$fh>;
-	close $fh;
-	my ($r1, $r2, $r3) = split "\t", $line;
+    open my $fh, 'params.txt';
+    my $line = <$fh>;
+    close $fh;
+    my ($r1, $r2, $r3) = split "\t", $line;
 
-	80-95 : out, clocks, in, tid, clock1, clock2, result
+    80-95 : out, clocks, in, tid, clock1, clock2, result
 
 
 --:-:1:-:1      S2R tid,   SR_TID.X;

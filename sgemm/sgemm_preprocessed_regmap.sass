@@ -2,18 +2,18 @@
 #
 # SharedSize: 16384
 # Params(8):
-#	0:0x140:4:4	param_C,
-#	1:0x144:4:0	param_m,
-#	2:0x148:4:0	param_n,
-#	3:0x14c:4:0	param_k,
-#	4:0x150:4:0	param_lda,
-#	5:0x154:4:0	param_ldb,
-#	6:0x158:4:0	param_ldc
-#	7:0x15c:4:0	param_D // for diagnostic printf output
+#   0:0x140:4:4 param_C,
+#   1:0x144:4:0 param_m,
+#   2:0x148:4:0 param_n,
+#   3:0x14c:4:0 param_k,
+#   4:0x150:4:0 param_lda,
+#   5:0x154:4:0 param_ldb,
+#   6:0x158:4:0 param_ldc
+#   7:0x15c:4:4 param_D // for diagnostic printf output
 #
 # Globals:
-#   c[0x0][0x160]: texA
-#   c[0x0][0x164]: texB
+#   c[0x0][0x160]: texA (the value is 1)
+#   c[0x0][0x164]: texB (the value is 0)
 
 
 // Scheduler doesn't handle the dependency flags yet,
@@ -48,34 +48,33 @@
 --:-:-:-:1      BFE.U32 R119, R118, 0x205;
 --:-:-:-:1      LOP.AND R120, R118, 0x1f;
 --:-:-:-:1      SHR.U32 R116, R118, 0x7;
---:-:-:-:1      MOV32I R4, 0x80000000;
---:-:-:-:1      SHR.U32 R7, R118, 0x3;
 --:-:-:-:1      MOV R3, c[0x0][0x14c];
---:-:-:-:1      BFE.U32 R5, R118, 0x301;
---:-:-:-:1      LOP.AND R6, R118, 0x1;
---:-:-:-:2      ISCADD R112, R119, R120, 0x7;
---:-:-:-:1      LOP.AND R7, R7, 0x2;
+--:-:-:-:1      SHR.U32 R6, R118, 0x3;
+--:-:-:-:1      LOP.AND R5, R118, 0x1;
+--:-:-:-:2      BFE.U32 R4, R118, 0x301;
+--:-:-:-:1      ISCADD R112, R119, R120, 0x7;
+--:-:-:-:1      IADD R3, R3, -0x8;
 --:-:-:-:1      SHL R116, R116, 0x4;
 --:-:-:-:1 @!P0 MOV R1, c[0x0][0x150];
 --:-:-:-:1      SHL R117, R119, 0x3;
 --:-:-:-:1  @P0 MOV R1, c[0x0][0x154];
 --:-:-:-:1      SHL R112, R112, 0x2;
 06:-:-:-:1      SEL R0, R122, R121, P0;                // Wait Dep 2 & 3
---:-:-:-:1 @!P0 LOP.OR R115, R4, c[0x0][0x160]; // texA
---:-:-:-:1  @P0 LOP.OR R115, R4, c[0x0][0x164]; // texB
---:-:-:-:1      IADD R3, R3, -0x8;
+--:-:-:-:1 @!P0 MOV32I R115, 0x80000001; // texA
+--:-:-:-:1  @P0 MOV32I R115, 0x80000000; // texB
+--:-:-:-:1      LOP.AND R6, R6, 0x2;
 --:-:-:-:1      SHL R2, R1, 0x2;
---:-:-:-:1      XMAD.MRG R8, R1, R119.H1, RZ; // XMAD.LO is a macro that is expanded out into the 3 XMADs
+--:-:-:-:1      XMAD.MRG R7, R1, R119.H1, RZ; // XMAD.LO is a macro that is expanded out into the 3 XMADs
 --:-:-:-:1      ISCADD R104, R0, R120, 0x7;
---:-:-:-:1      LOP.OR R116, R116, R5;
---:-:-:-:1      LOP3.LUT R117, R117, R6, R7, 0xfe;
---:-:-:-:1      XMAD.MRG R9, R3, R1.H1, RZ;
+--:-:-:-:1      XMAD.MRG R8, R3, R1.H1, RZ;
+--:-:-:-:1      LOP.OR R116, R116, R4;
+--:-:-:-:1      LOP3.LUT R117, R117, R5, R6, 0xfe; // R117 = R117 | R5 | R6
 --:-:-:-:1      IADD R113, R2, R2;
 --:-:-:-:1  @P0 IADD R112, R112, 4x<1024>;
---:-:-:-:1      XMAD R104, R1, R119, R104;
+--:-:-:-:2      XMAD R104, R1, R119, R104;
 --:-:-:-:2      SHL R116, R116, 0x4;
---:-:-:-:3      ISCADD R117, R117, 4x<1024>, 0x4;
---:-:-:-:2      XMAD.PSL.CBCC R104, R1.H1, R8.H1, R104;
+--:-:-:-:2      ISCADD R117, R117, 4x<1024>, 0x4;
+--:-:-:-:2      XMAD.PSL.CBCC R104, R1.H1, R7.H1, R104;
 --:-:-:-:4      TLD.B.LZ.T R96, R104, R115, 0x0, 1D, 0x1;
 --:-:-:-:1      IADD R105, R104, 1x<32>;
 --:-:-:-:0      IADD R106, R104, 1x<64>;
@@ -91,7 +90,7 @@
 --:-:-:-:1      TLD.B.LZ.T R101, R109, R115, 0x0, 1D, 0x1;
 --:-:-:-:0      IADD R111, R107, R2;
 --:-:-:-:2      TLD.B.LZ.T R102, R110, R115, 0x0, 1D, 0x1;
---:-:-:-:0      XMAD.PSL.CBCC R114, R3.H1, R9.H1, R114;
+--:-:-:-:0      XMAD.PSL.CBCC R114, R3.H1, R8.H1, R114;
 --:-:2:Y:2      TLD.B.LZ.P R103, R111, R115, 0x0, 1D, 0x1;  // Set Dep 2, Stall 1
 
 // Increment tracks after the loads are complete to avoid needing write-after-read dependencies

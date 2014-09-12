@@ -29,23 +29,23 @@ close $fh;
 
 foreach my $r1 (0..15)
 {
-	foreach my $r2 (0..15)
-	{
-		next if $r1 == $r2;
+    foreach my $r2 (0..15)
+    {
+        next if $r1 == $r2;
 
-		open my $fh, '>params.txt';
+        open my $fh, '>params.txt';
 
-		my $params = join "\t", $r1, $r2;
+        my $params = join "\t", $r1, $r2;
 
-		print $fh $params;
-		close $fh;
+        print $fh $params;
+        close $fh;
 
-		`maxas.pl -i throughput.sass microbench.cubin`;
+        `maxas.pl -i throughput.sass microbench.cubin`;
 
-		my $data = `Release\\microbench.exe $blocks $thread128 1 $fops`;
+        my $data = `Release\\microbench.exe $blocks $thread128 1 $fops`;
 
-		my ($gflops) = $data =~ /GFLOPS: ([0-9\.]+)/ms;
+        my ($gflops) = $data =~ /GFLOPS: ([0-9\.]+)/ms;
 
-		print "$params\t$gflops\n";
-	}
+        print "$params\t$gflops\n";
+    }
 }
