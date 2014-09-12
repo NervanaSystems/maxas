@@ -14,7 +14,7 @@ sub getI
 {
     my ($orig, $pos, $mask) = @_;
     my $val = $orig;
-    my $neg = $val =~ s/^\-//;
+    my $neg = $val =~ s|^\-||;
 
     # parse out our custom index immediates for addresses
     if ($val  =~ m'^(\d+)[xX]<([^>]+)>')

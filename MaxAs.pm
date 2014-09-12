@@ -407,10 +407,10 @@ sub Preprocess
     my ($file, $doReg) = @_;
 
     # Strip out comments
-    $file =~ s/^<COMMENT>.*?^<\/COMMENT>\n?//gms;
+    $file =~ s|^<COMMENT>.*?^</COMMENT>\n?||gms;
 
     # Pull in the reg map first as the Scheduler will need it to handle vector instructions
-    $file =~ m'^<REGISTER_MAPPING>(.*?)^<\/REGISTER_MAPPING>'ms;
+    $file =~ m'^<REGISTER_MAPPING>(.*?)^</REGISTER_MAPPING>'ms;
 
     my $regMap = getRegisterMap($file, $1);
 
@@ -421,7 +421,7 @@ sub Preprocess
     $file = replaceXMADs($file);
 
     # Pick out the SCHEDULE_BLOCK sections
-    my @schedBlocks = $file =~ m'^<SCHEDULE_BLOCK>(.*?)^<\/SCHEDULE_BLOCK>'gms;
+    my @schedBlocks = $file =~ m'^<SCHEDULE_BLOCK>(.*?)^</SCHEDULE_BLOCK>'gms;
 
     # Schedule them
     foreach my $i (0 .. $#schedBlocks)
@@ -430,10 +430,10 @@ sub Preprocess
     }
 
     # Replace the results
-    $file =~ s/^<SCHEDULE_BLOCK>(.*?)^<\/SCHEDULE_BLOCK>\n?/ shift @schedBlocks /egms;
+    $file =~ s|^<SCHEDULE_BLOCK>(.*?)^</SCHEDULE_BLOCK>\n?| shift @schedBlocks |egms;
 
     # Do the regmapping stage if requested
-    if ($doReg && $file =~ s/^<REGISTER_MAPPING>(.*?)^<\/REGISTER_MAPPING>\n?//ms)
+    if ($doReg && $file =~ s|^<REGISTER_MAPPING>(.*?)^</REGISTER_MAPPING>\n?||ms)
     {
         my $out;
         foreach my $line (split "\n", $file)
@@ -717,11 +717,11 @@ sub getRegisterMap
     foreach my $line (split "\n", $regmapText)
     {
         # strip leading space
-        $line =~ s/^\s+//;
+        $line =~ s|^\s+||;
         # strip comments
-        $line =~ s/(?:#|\/\/).*//;
+        $line =~ s|(?:#|//).*||;
         # strip trailing space
-        $line =~ s/\s+$//;
+        $line =~ s|\s+$||;
         # skip blank lines
         next unless $line =~ m'\S';
 
@@ -908,13 +908,13 @@ sub normalizeSpacing
 sub preProcessLine
 {
     # strip leading space
-    $_[0] =~ s/^\s+//;
+    $_[0] =~ s|^\s+||;
 
     # preserve comment but check for emptiness
     my $val = shift;
 
     # strip comments
-    $val =~ s/(?:#|\/\/).*//;
+    $val =~ s|(?:#|//).*||;
 
     # skip blank lines
     return $val =~ m'\S';
