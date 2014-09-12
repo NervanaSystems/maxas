@@ -244,14 +244,14 @@ float assemblySgemm(CUdeviceptr devC, CUdeviceptr devA, CUdeviceptr devB, int N,
 					int i = blk + tid;
 					printf("by: %3d, bx: %3d, tid:%3d, rA:%5d, rB:%5d, wr:%5d, rd:%5d, cx:%5d, cy:%5d, ci:%5d, c:%.2f\n", 
 						by, bx, tid, 
-						D[i+0x000]/4,
-						D[i+0x100]/4,
-						D[i+0x200]/4,
-						D[i+0x300]/4,
-						D[i+0x400],
-						D[i+0x500],
-						D[i+0x600],
-						fD[i+0x700]
+						D[i + 0 * 256]/4,
+						D[i + 1 * 256]/4,
+						D[i + 2 * 256]/4,
+						D[i + 3 * 256]/4,
+						D[i + 4 * 256],
+						D[i + 5 * 256],
+						D[i + 6 * 256],
+					   fD[i + 7 * 256]
 					);
 				}
 			}

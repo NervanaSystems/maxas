@@ -84,9 +84,9 @@
 --:-:-:-:1      BFE.U32 tid4,   tid, 0x205;
 --:-:-:-:1      ISCADD  track0, blk, tid32, 0x7;
 --:-:-:-:1      XMAD.LO track0, ldx, tid4,  track0, xmad0; // XMAD.LO is a macro that is expanded out into the 3 XMADs
---:-:-:-:1      IADD track1, track0, 0x20;
---:-:-:-:1      IADD track2, track0, 0x40;
---:-:-:-:1      IADD track3, track0, 0x60;
+--:-:-:-:1      IADD track1, track0, 1x<32>;
+--:-:-:-:1      IADD track2, track0, 1x<64>;
+--:-:-:-:1      IADD track3, track0, 1x<96>;
 --:-:-:-:1      IADD track4, track0, ldx4;
 --:-:-:-:1      IADD track5, track1, ldx4;
 --:-:-:-:1      IADD track6, track2, ldx4;
@@ -100,7 +100,7 @@
 // writeS = (tid32 + tid4*128) * 4 + (4096 if B)
 --:-:-:-:1      ISCADD writeS, tid4,   tid32, 0x7;
 --:-:-:-:1      SHL    writeS, writeS, 0x2;
---:-:-:-:1  @P0 IADD   writeS, writeS, 0x1000;
+--:-:-:-:1  @P0 IADD   writeS, writeS, 4x<1024>;
 
 // readAs and readBs are carefully constructed to avoid any bank conflicts while loading from shared
 // readAs = (((tid >> 1) & 7) | ((tid >> 7) << 4)) << 4;
@@ -116,7 +116,7 @@
 --:-:-:-:1      LOP.AND  val2,   val2, 0x2;
 --:-:-:-:1      SHL      readBs, tid4, 0x3;
 --:-:-:-:1      LOP3.LUT readBs, readBs, val1,   val2, 0xfe;
---:-:-:-:1      ISCADD   readBs, readBs, 0x1000, 0x4;
+--:-:-:-:1      ISCADD   readBs, readBs, 4x<1024>, 0x4;
 
 // Preload the first 8 lines from texture memory
 --:-:-:-:1      TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;
@@ -242,118 +242,122 @@ LOOP:
 
 	my %insert =
 	(
-		j0c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 4x<1*128 + 00>];',
-		j0c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 4x<1*128 + 00>];',
-		j0c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 4x<1*128 + 32>];',
-		j0c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 4x<1*128 + 16>]; // Set Dep 1',
-
 		# Don't start before 12 to let ISETP to write P0
-		j0c29 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;',
-		j0c31 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX1, track1, tex, 0x0, 1D, 0x1;',
-		j0c33 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX2, track2, tex, 0x0, 1D, 0x1;',
-		j0c35 => '--:-:2:-:1  @P0 TLD.B.LZ.P loadX3, track3, tex, 0x0, 1D, 0x1; // Set Dep 2',
+		j0c29 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;\n",
+		j0c31 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX1, track1, tex, 0x0, 1D, 0x1;\n",
+		j0c33 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX2, track2, tex, 0x0, 1D, 0x1;\n",
+		j0c35 => "--:-:2:-:1  \@P0 TLD.B.LZ.P loadX3, track3, tex, 0x0, 1D, 0x1; // Set Dep 2\n",
 
-		j1c0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<2*128 + 00>];',
-		j1c2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 4x<2*128 + 00>];',
-		j1c4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 4x<2*128 + 32>];',
-		j1c6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 4x<2*128 + 16>]; // Set Dep 1',
+		j1c29 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX4, track4, tex, 0x0, 1D, 0x1;\n",
+		j1c31 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX5, track5, tex, 0x0, 1D, 0x1;\n",
+		j1c33 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX6, track6, tex, 0x0, 1D, 0x1;\n",
+		j1c35 => "--:-:3:-:1  \@P0 TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1; // Set Dep 3\n",
 
-		j1c29 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX4, track4, tex, 0x0, 1D, 0x1;',
-		j1c31 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX5, track5, tex, 0x0, 1D, 0x1;',
-		j1c33 => '--:-:-:-:1  @P0 TLD.B.LZ.T loadX6, track6, tex, 0x0, 1D, 0x1;',
-		j1c35 => '--:-:3:-:1  @P0 TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1; // Set Dep 3',
+		j5c29 => "02:-:-:-:1  \@P0 STS [writeS + 4x<000 + 00>], loadX0;       // Wait Dep 2\n",
+		j5c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 32>], loadX1;\n",
+		j5c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 64>], loadX2;\n",
+		j5c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 96>], loadX3;\n",
 
-		j2c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 4x<3*128 + 00>];',
-		j2c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 4x<3*128 + 00>];',
-		j2c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 4x<3*128 + 32>];',
-		j2c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 4x<3*128 + 16>]; // Set Dep 1',
-
-		j3c0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<4*128 + 00>];',
-		j3c2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 4x<4*128 + 00>];',
-		j3c4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 4x<4*128 + 32>];',
-		j3c6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 4x<4*128 + 16>]; // Set Dep 1',
-
-		j4c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 4x<5*128 + 00>];',
-		j4c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 4x<5*128 + 00>];',
-		j4c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 4x<5*128 + 32>];',
-		j4c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 4x<5*128 + 16>]; // Set Dep 1',
-
-		j5c0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<6*128 + 00>];',
-		j5c2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 4x<6*128 + 00>];',
-		j5c4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 4x<6*128 + 32>];',
-		j5c6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 4x<6*128 + 16>]; // Set Dep 1',
-
-		j5c29 => '02:-:-:-:1  @P0 STS [writeS + 4x<000 + 00>], loadX0;       // Wait Dep 2',
-		j5c31 => '--:-:-:-:1  @P0 STS [writeS + 4x<000 + 32>], loadX1;',
-		j5c33 => '--:-:-:-:1  @P0 STS [writeS + 4x<000 + 64>], loadX2;',
-		j5c35 => '--:-:-:-:1  @P0 STS [writeS + 4x<000 + 96>], loadX3;',
-
-		j6c0  => '--:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 4x<7*128 + 00>];',
-		j6c2  => '--:-:-:-:1      LDS.U.128 j1By00, [readBs + 4x<7*128 + 00>];',
-		j6c4  => '--:-:-:-:1      LDS.U.128 j1Ax32, [readAs + 4x<7*128 + 32>];',
-		j6c6  => '--:-:1:-:1      LDS.U.128 j1By16, [readBs + 4x<7*128 + 16>]; // Set Dep 1',
-
-		j6c29 => '04:-:-:-:1  @P0 STS [writeS + 4x<512 + 00>], loadX4;       // Wait Dep 3',
-		j6c31 => '--:-:-:-:1  @P0 STS [writeS + 4x<512 + 32>], loadX5;',
-		j6c33 => '--:-:-:-:1  @P0 STS [writeS + 4x<512 + 64>], loadX6;',
-		j6c35 => '--:-:-:-:1  @P0 STS [writeS + 4x<512 + 96>], loadX7;',
+		j6c29 => "04:-:-:-:1  \@P0 STS [writeS + 4x<512 + 00>], loadX4;       // Wait Dep 3\n",
+		j6c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 32>], loadX5;\n",
+		j6c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 64>], loadX6;\n",
+		j6c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 96>], loadX7;\n",
 
 		# We need one barrier in the main loop after writing shared memory.
-		j6c59 => '--:-:-:-:5  @P0 BAR.SYNC 0x0;',
-
-		# Swap our share buffer location.  We don't need an additional barrier because of these swaps.
+		# Note, BAR.SYNCs do not sync memory read access automatically, you still need to flag the barriers (writes are sync'd).
+		# After the BAR, swap our share buffer location.  We don't need an additional barrier because of these swaps.
 		# Note, this doubles our shared memory usage but this kernel's occupancy is entirely bound by registers.
-		j6c60 => '--:-:-:-:1  @P0 LOP.XOR readAs, readAs, 4x<2048>;',
-		j6c61 => '--:-:-:-:1  @P0 LOP.XOR readBs, readBs, 4x<2048>;',
-		j6c62 => '--:-:-:-:1  @P0 LOP.XOR writeS, writeS, 4x<2048>;',
-
-		j7c0  => '--:-:-:-:1  @P0 LDS.U.128 j0Ax00, [readAs + 4x<0*128 + 00>];',
-		j7c2  => '--:-:-:-:1  @P0 LDS.U.128 j0By00, [readBs + 4x<0*128 + 00>];',
-		j7c4  => '--:-:-:-:1  @P0 LDS.U.128 j0Ax32, [readAs + 4x<0*128 + 32>];',
-		j7c6  => '--:-:1:-:1  @P0 LDS.U.128 j0By16, [readBs + 4x<0*128 + 16>]; // Set Dep 1',
+		# LOP.XOR readAs needs to be 4 clocks prior to the LDS.U.128 for readAs (but push this as far down as possible)
+		j6c62 =>
+				"01:-:-:-:5  \@P0 BAR.SYNC 0x0; // Wait Dep 1\n" .
+				"--:-:-:-:1  \@P0 LOP.XOR readAs, readAs, 4x<2048>;\n" .
+				"--:-:-:-:1  \@P0 LOP.XOR readBs, readBs, 4x<2048>;\n" .
+				"--:-:-:-:1  \@P0 LOP.XOR writeS, writeS, 4x<2048>;\n",
 
 		# Note having 8 IADDs slightly hits our FFMA performance, but TLD doesn't take an offset.
 		# LDG.CI doesn't have this issue, but doesn't give you the nice features of texture loads:
 		#   -Boundry clamping:  simplifies our matrix load logic so we don't need to worry about loading out of bounds
 		#   -Normalized floats: if we don't need full 32 bits of precision we could store our matrices using 16 or 8 bit values
-		j7c47 => '--:-:-:-:1  @P0 IADD track0, track0, ldx8;',
-		j7c49 => '--:-:-:-:1  @P0 IADD track1, track1, ldx8;',
-		j7c51 => '--:-:-:-:1  @P0 IADD track2, track2, ldx8;',
-		j7c53 => '--:-:-:-:1  @P0 IADD track3, track3, ldx8;',
-		j7c55 => '--:-:-:-:1  @P0 IADD track4, track4, ldx8;',
-		j7c57 => '--:-:-:-:1  @P0 IADD track5, track5, ldx8;',
-		j7c59 => '--:-:-:-:1  @P0 IADD track6, track6, ldx8;',
-		j7c61 => '--:-:-:-:1  @P0 IADD track7, track7, ldx8;',
+		j7c47 => "--:-:-:-:1  \@P0 IADD track0, track0, ldx8;\n",
+		j7c49 => "--:-:-:-:1  \@P0 IADD track1, track1, ldx8;\n",
+		j7c51 => "--:-:-:-:1  \@P0 IADD track2, track2, ldx8;\n",
+		j7c53 => "--:-:-:-:1  \@P0 IADD track3, track3, ldx8;\n",
+		j7c55 => "--:-:-:-:1  \@P0 IADD track4, track4, ldx8;\n",
+		j7c57 => "--:-:-:-:1  \@P0 IADD track5, track5, ldx8;\n",
+		j7c59 => "--:-:-:-:1  \@P0 IADD track6, track6, ldx8;\n",
+		j7c61 => "--:-:-:-:1  \@P0 IADD track7, track7, ldx8;\n",
 
-		j7c63 => '--:-:-:Y:5  @P0 BRA LOOP;',
+		j7c63 => "--:-:-:Y:5  \@P0 BRA LOOP;\n",
 	);
 
 	my $out;
 	foreach my $j (0 .. 7)
 	{
-		my $odd = $j & 1;
+		my $odd      = $j & 1;
+		my $nOdd     = $odd ? 0 : 1;
+		# Our rolling blocking registers stay one load ahead off the FFMA's
+		my $rsOffset = ($j + 1) % 8;
+		# No need to load on last loop iteration
+		my $rsPred   = $j == 7 ? '@P0' : '   ';
+
+		# Roll up our LDS ops here to keep them easier to manage and tune
+		$insert{"j${j}c0"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+		$insert{"j${j}c2"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+		$insert{"j${j}c4"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dAx32, [readAs + 4x<%d*128 + 32>];\n", $rsPred, $nOdd, $rsOffset;
+		$insert{"j${j}c6"} = sprintf "--:-:1:-:1  %s LDS.U.128 j%dBy16, [readBs + 4x<%d*128 + 16>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
+
+		# You can experiment here with different vector load sizes
+		# LDS.128 runs about 40 Gflops faster than LDS.64 (GM107).  Not a huge difference since our latencies are so well hidden.
+		# I think LDS.128 is implemented internally as a pair of LDS.64 ops which could be another reason for the comparable performance.
+		# I think the big benefit with 128 is being able to issue all our LDS ops earlier, allowing more FFMA's prior to reading out the results.
+		#$insert{"j${j}c0"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c2"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx02, [readAs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c4"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c6"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy02, [readBs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c8"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx32, [readAs + 4x<%d*128 + 32>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c10"} = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx34, [readAs + 4x<%d*128 + 34>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c12"} = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy16, [readBs + 4x<%d*128 + 16>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c14"} = sprintf "--:-:1:-:1  %s LDS.U.64 j%dBy18, [readBs + 4x<%d*128 + 18>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
+
+		# This one drops performance by about 200 Gflops.  So you want to at least use LDS.64 if you can.
+		#$insert{"j${j}c0"}  = sprintf "--:-:-:-:1  %s LDS j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c1"}  = sprintf "--:-:-:-:1  %s LDS j%dAx01, [readAs + 4x<%d*128 + 01>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c2"}  = sprintf "--:-:-:-:1  %s LDS j%dAx02, [readAs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c3"}  = sprintf "--:-:-:-:1  %s LDS j%dAx03, [readAs + 4x<%d*128 + 03>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c4"}  = sprintf "--:-:-:-:1  %s LDS j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c5"}  = sprintf "--:-:-:-:1  %s LDS j%dBy01, [readBs + 4x<%d*128 + 01>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c6"}  = sprintf "--:-:-:-:1  %s LDS j%dBy02, [readBs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c7"}  = sprintf "--:-:-:-:1  %s LDS j%dBy03, [readBs + 4x<%d*128 + 03>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c8"}  = sprintf "--:-:-:-:1  %s LDS j%dAx32, [readAs + 4x<%d*128 + 32>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c9"}  = sprintf "--:-:-:-:1  %s LDS j%dAx33, [readAs + 4x<%d*128 + 33>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c10"} = sprintf "--:-:-:-:1  %s LDS j%dAx34, [readAs + 4x<%d*128 + 34>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c11"} = sprintf "--:-:-:-:1  %s LDS j%dAx35, [readAs + 4x<%d*128 + 35>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c12"} = sprintf "--:-:-:-:1  %s LDS j%dBy16, [readBs + 4x<%d*128 + 16>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c13"} = sprintf "--:-:-:-:1  %s LDS j%dBy17, [readBs + 4x<%d*128 + 17>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c14"} = sprintf "--:-:1:-:1  %s LDS j%dBy18, [readBs + 4x<%d*128 + 18>];\n", $rsPred, $nOdd, $rsOffset;
+		#$insert{"j${j}c15"} = sprintf "--:-:1:-:1  %s LDS j%dBy19, [readBs + 4x<%d*128 + 19>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
+
 		foreach my $c (0 .. 63)
 		{
-			my $idx = sprintf 'j%dc%d', $j ,$c;
-
 			my ($x, $y) = $cOrder[$c] =~ /^(x\d+)(y\d+)/;
 
 			# Grab an instruction for insertion if one exists for this j and c combination
-			my $ins = exists $insert{$idx} ? "$insert{$idx}\n" : '';
+			my $ins = $insert{"j${j}c$c"} || '';
 
 			# Scatter some yields in there to better balance the workload and reduce sync stalls
 			# Don't pair a yeild with the dual issued ffmas as that kills performance for some reason
 			my $yield  = $c == 28 ? 'Y' : '-';
 
-			# The first FFMA needs to wait on the prior loop's LDS.U.128 ops to finish
-			my $waitDB = $c == 0 ? '01' : '--';
+			# The first FFMA needs to wait on the prior loop's LDS.U.128 ops to finish (except if the barrier does the wait for us)
+			my ($waitDB, $comment) = $c == 0 && $j < 7 ? ('01', ' // Wait Dep 1') : ('--','');
 
 			# Dual issue these ops
 			my $stall  = $ins =~ /LDS|TLD|STS|BAR/ ? 0 : 1;
 
 			my $ctrl   = "$waitDB:-:-:$yield:$stall";
 
-			$out .= sprintf "%s      FFMA c%s, j%dA%s, j%dB%s, c%s;\n%s", $ctrl, $cOrder[$c], $odd, $x, $odd, $y, $cOrder[$c], $ins;
+			# output our FFMA and also any inserted ops
+			$out .= sprintf "%s      FFMA c%s, j%dA%s, j%dB%s, c%s;%s\n%s", $ctrl, $cOrder[$c], $odd, $x, $odd, $y, $cOrder[$c], $comment, $ins;
 		}
 	}
 	return $out;
@@ -370,8 +374,8 @@ LOOP:
 // Remap readAs and readBs onto writeCs so we can shuffle the output for coalesced global writes.
 // readAs stays constant, readBs colapses down from stride 4 to 1
 
-// Remove the high bit if present from last loop's xor
---:-:-:-:1      LOP.AND readAs, readAs, 0xfff;
+// Remove the high bit if present from the last loop's xor
+--:-:-:-:1      LOP.AND readAs, readAs, 4x<2047>;
 
 //readBs = ((readBs & 0x7f) >> 2) | ((readBs & 0x180) >> 3)
 --:-:-:-:1      LOP.AND val3, readBs, 0x180;
@@ -403,18 +407,18 @@ LOOP:
 --:-:-:-:1      XMAD.LO ci, cy00, ldc, cx, xmad2;
 --:-:-:-:1      ISCADD Cy00, ci, c[0x0][0x140], 0x2;
 
-// When writing in assembly, it's essential to be able to 'printf' your output to validate your code.
+// When writing in assembly, being able to 'printf' is sometimes easier than stepping through the debugger.
 // Here's how it's done.  Drop something like this in your code (math assumes 256 threads and 1 block).
 // Then modify the c code to accept this many params per thread to printf (see assemblySgemm function).
 //--:-:-:-:1      ISCADD D, tid, c[0x0][0x15c], 0x2;
-//--:-:-:-:1      STG.CS [D+0x0000], readAs;
-//--:-:-:-:1      STG.CS [D+0x0400], readBs;
-//--:-:-:-:1      STG.CS [D+0x0800], writeCs;
-//--:-:-:-:1      STG.CS [D+0x0c00], readCs;
-//--:-:-:-:1      STG.CS [D+0x1000], cx;
-//--:-:-:-:1      STG.CS [D+0x1400], cy00;
-//--:-:-:-:1      STG.CS [D+0x1800], ci;
-//--:-:-:-:1      STG.CS [D+0x1c00], cx35y19;
+//--:-:-:-:1      STG.CS [D + 4x<0 * 256>], readAs;
+//--:-:-:-:1      STG.CS [D + 4x<1 * 256>], readBs;
+//--:-:-:-:1      STG.CS [D + 4x<2 * 256>], writeCs;
+//--:-:-:-:1      STG.CS [D + 4x<3 * 256>], readCs;
+//--:-:-:-:1      STG.CS [D + 4x<4 * 256>], cx;
+//--:-:-:-:1      STG.CS [D + 4x<5 * 256>], cy00;
+//--:-:-:-:1      STG.CS [D + 4x<6 * 256>], ci;
+//--:-:-:-:1      STG.CS [D + 4x<7 * 256>], cx35y19;
 
 // Setup our matrix bounds checking vars and preds
 --:-:-:-:1      ISETP.LT.AND P5, PT, cx, m, PT;

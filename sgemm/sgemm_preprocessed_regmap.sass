@@ -71,16 +71,16 @@
 --:-:-:-:1      LOP3.LUT R117, R117, R6, R7, 0xfe;
 --:-:-:-:1      XMAD.MRG R9, R3, R1.H1, RZ;
 --:-:-:-:1      IADD R113, R2, R2;
---:-:-:-:1  @P0 IADD R112, R112, 0x1000;
+--:-:-:-:1  @P0 IADD R112, R112, 4x<1024>;
 --:-:-:-:1      XMAD R104, R1, R119, R104;
 --:-:-:-:2      SHL R116, R116, 0x4;
---:-:-:-:3      ISCADD R117, R117, 0x1000, 0x4;
+--:-:-:-:3      ISCADD R117, R117, 4x<1024>, 0x4;
 --:-:-:-:2      XMAD.PSL.CBCC R104, R1.H1, R8.H1, R104;
 --:-:-:-:4      TLD.B.LZ.T R96, R104, R115, 0x0, 1D, 0x1;
---:-:-:-:1      IADD R105, R104, 0x20;
---:-:-:-:0      IADD R106, R104, 0x40;
+--:-:-:-:1      IADD R105, R104, 1x<32>;
+--:-:-:-:0      IADD R106, R104, 1x<64>;
 --:-:-:-:1      TLD.B.LZ.T R97, R105, R115, 0x0, 1D, 0x1;
---:-:-:-:0      IADD R107, R104, 0x60;
+--:-:-:-:0      IADD R107, R104, 1x<96>;
 --:-:-:-:1      TLD.B.LZ.T R98, R106, R115, 0x0, 1D, 0x1;
 --:-:-:-:0      IADD R108, R104, R2;
 --:-:-:-:1      TLD.B.LZ.T R99, R107, R115, 0x0, 1D, 0x1;
@@ -214,7 +214,7 @@ LOOP:
 // Loop end condition
 --:-:-:-:1      ISETP.LE.AND P0, PT, R104, R114, PT;
 
-01:-:-:-:0      FFMA R1, R66, R72, R1;
+01:-:-:-:0      FFMA R1, R66, R72, R1; // Wait Dep 1
 --:-:-:-:1      LDS.U.128 R80, [R116 + 4x<1*128 + 00>];
 --:-:-:-:1      FFMA R3, R64, R72, R3;
 --:-:-:-:0      FFMA R2, R64, R73, R2;
@@ -286,7 +286,7 @@ LOOP:
 --:-:-:-:1      FFMA R25, R66, R78, R25;
 --:-:-:-:1      FFMA R26, R64, R79, R26;
 --:-:-:-:1      FFMA R24, R66, R79, R24;
-01:-:-:-:0      FFMA R1, R82, R88, R1;
+01:-:-:-:0      FFMA R1, R82, R88, R1; // Wait Dep 1
 --:-:-:-:1      LDS.U.128 R64, [R116 + 4x<2*128 + 00>];
 --:-:-:-:1      FFMA R3, R80, R88, R3;
 --:-:-:-:0      FFMA R2, R80, R89, R2;
@@ -358,7 +358,7 @@ LOOP:
 --:-:-:-:1      FFMA R25, R82, R94, R25;
 --:-:-:-:1      FFMA R26, R80, R95, R26;
 --:-:-:-:1      FFMA R24, R82, R95, R24;
-01:-:-:-:0      FFMA R1, R66, R72, R1;
+01:-:-:-:0      FFMA R1, R66, R72, R1; // Wait Dep 1
 --:-:-:-:1      LDS.U.128 R80, [R116 + 4x<3*128 + 00>];
 --:-:-:-:1      FFMA R3, R64, R72, R3;
 --:-:-:-:0      FFMA R2, R64, R73, R2;
@@ -426,7 +426,7 @@ LOOP:
 --:-:-:-:1      FFMA R25, R66, R78, R25;
 --:-:-:-:1      FFMA R26, R64, R79, R26;
 --:-:-:-:1      FFMA R24, R66, R79, R24;
-01:-:-:-:0      FFMA R1, R82, R88, R1;
+01:-:-:-:0      FFMA R1, R82, R88, R1; // Wait Dep 1
 --:-:-:-:1      LDS.U.128 R64, [R116 + 4x<4*128 + 00>];
 --:-:-:-:1      FFMA R3, R80, R88, R3;
 --:-:-:-:0      FFMA R2, R80, R89, R2;
@@ -494,7 +494,7 @@ LOOP:
 --:-:-:-:1      FFMA R25, R82, R94, R25;
 --:-:-:-:1      FFMA R26, R80, R95, R26;
 --:-:-:-:1      FFMA R24, R82, R95, R24;
-01:-:-:-:0      FFMA R1, R66, R72, R1;
+01:-:-:-:0      FFMA R1, R66, R72, R1; // Wait Dep 1
 --:-:-:-:1      LDS.U.128 R80, [R116 + 4x<5*128 + 00>];
 --:-:-:-:1      FFMA R3, R64, R72, R3;
 --:-:-:-:0      FFMA R2, R64, R73, R2;
@@ -562,7 +562,7 @@ LOOP:
 --:-:-:-:1      FFMA R25, R66, R78, R25;
 --:-:-:-:1      FFMA R26, R64, R79, R26;
 --:-:-:-:1      FFMA R24, R66, R79, R24;
-01:-:-:-:0      FFMA R1, R82, R88, R1;
+01:-:-:-:0      FFMA R1, R82, R88, R1; // Wait Dep 1
 --:-:-:-:1      LDS.U.128 R64, [R116 + 4x<6*128 + 00>];
 --:-:-:-:1      FFMA R3, R80, R88, R3;
 --:-:-:-:0      FFMA R2, R80, R89, R2;
@@ -634,7 +634,7 @@ LOOP:
 --:-:-:-:1      FFMA R25, R82, R94, R25;
 --:-:-:-:1      FFMA R26, R80, R95, R26;
 --:-:-:-:1      FFMA R24, R82, R95, R24;
-01:-:-:-:0      FFMA R1, R66, R72, R1;
+01:-:-:-:0      FFMA R1, R66, R72, R1; // Wait Dep 1
 --:-:-:-:1      LDS.U.128 R80, [R116 + 4x<7*128 + 00>];
 --:-:-:-:1      FFMA R3, R64, R72, R3;
 --:-:-:-:0      FFMA R2, R64, R73, R2;
@@ -701,16 +701,16 @@ LOOP:
 --:-:-:-:1      FFMA R31, R65, R78, R31;
 --:-:-:-:1      FFMA R29, R67, R78, R29;
 --:-:-:-:1      FFMA R30, R65, R79, R30;
---:-:-:-:0      FFMA R28, R67, R79, R28;
---:-:-:-:5  @P0 BAR.SYNC 0x0;
+--:-:-:-:1      FFMA R28, R67, R79, R28;
 --:-:-:-:1      FFMA R27, R64, R78, R27;
---:-:-:-:1  @P0 LOP.XOR R116, R116, 4x<2048>;
 --:-:-:-:1      FFMA R25, R66, R78, R25;
+--:-:-:-:0      FFMA R26, R64, R79, R26;
+01:-:-:-:5  @P0 BAR.SYNC 0x0; // Wait Dep 1
+--:-:-:-:1  @P0 LOP.XOR R116, R116, 4x<2048>;
 --:-:-:-:1  @P0 LOP.XOR R117, R117, 4x<2048>;
---:-:-:-:1      FFMA R26, R64, R79, R26;
 --:-:-:-:1  @P0 LOP.XOR R112, R112, 4x<2048>;
 --:-:-:-:1      FFMA R24, R66, R79, R24;
-01:-:-:-:0      FFMA R1, R82, R88, R1;
+--:-:-:-:0      FFMA R1, R82, R88, R1;
 --:-:-:-:1  @P0 LDS.U.128 R64, [R116 + 4x<0*128 + 00>];
 --:-:-:-:1      FFMA R3, R80, R88, R3;
 --:-:-:-:0      FFMA R2, R80, R89, R2;
@@ -791,7 +791,7 @@ LOOP:
 // Main loop is done, time to write C to global memory.
 // Remap readAs and readBs onto writeCs so we can shuffle the output for coalesced global writes.
 // readAs stays constant, readBs colapses down from stride 4 to 1
-// Remove the high bit if present from last loop's xor
+// Remove the high bit if present from the last loop's xor
 //readBs = ((readBs & 0x7f) >> 2) | ((readBs & 0x180) >> 3)
 //writeCs = readBs * 128 + readAs;
 // Read out the C values from shared in a simple tid mapped pattern but
@@ -800,18 +800,18 @@ LOOP:
 // cx = bx*128 + tid32 | ((tid & 0x80) >> 1);
 // cy = by*128 + tid4 << 5;
 // C += (cy*ldc + cx) * 4;
-// When writing in assembly, it's essential to be able to 'printf' your output to validate your code.
+// When writing in assembly, being able to 'printf' is sometimes easier than stepping through the debugger.
 // Here's how it's done.  Drop something like this in your code (math assumes 256 threads and 1 block).
 // Then modify the c code to accept this many params per thread to printf (see assemblySgemm function).
 //--:-:-:-:1      ISCADD D, tid, c[0x0][0x15c], 0x2;
-//--:-:-:-:1      STG.CS [D+0x0000], readAs;
-//--:-:-:-:1      STG.CS [D+0x0400], readBs;
-//--:-:-:-:1      STG.CS [D+0x0800], writeCs;
-//--:-:-:-:1      STG.CS [D+0x0c00], readCs;
-//--:-:-:-:1      STG.CS [D+0x1000], cx;
-//--:-:-:-:1      STG.CS [D+0x1400], cy00;
-//--:-:-:-:1      STG.CS [D+0x1800], ci;
-//--:-:-:-:1      STG.CS [D+0x1c00], cx35y19;
+//--:-:-:-:1      STG.CS [D + 4x<0 * 256>], readAs;
+//--:-:-:-:1      STG.CS [D + 4x<1 * 256>], readBs;
+//--:-:-:-:1      STG.CS [D + 4x<2 * 256>], writeCs;
+//--:-:-:-:1      STG.CS [D + 4x<3 * 256>], readCs;
+//--:-:-:-:1      STG.CS [D + 4x<4 * 256>], cx;
+//--:-:-:-:1      STG.CS [D + 4x<5 * 256>], cy00;
+//--:-:-:-:1      STG.CS [D + 4x<6 * 256>], ci;
+//--:-:-:-:1      STG.CS [D + 4x<7 * 256>], cx35y19;
 // Setup our matrix bounds checking vars and preds
 // Setup our C output addresses and increments.
 // We pre-increment the output addresses to avoid write-after-read deps
@@ -824,7 +824,7 @@ LOOP:
 --:-:-:-:1      BFE.U32 R117, R117, 0x502;
 --:-:-:-:1      MOV R80, c[0x0][0x144];
 --:-:-:-:1      SHR.U32 R89, R89, 0x1;
---:-:-:-:1      LOP.AND R116, R116, 0xfff;
+--:-:-:-:1      LOP.AND R116, R116, 4x<2047>;
 --:-:-:-:1      ISCADD R76, R122, R76, 0x7;
 --:-:-:-:1      MOV R81, c[0x0][0x148];
 --:-:-:-:2      SHL R84, R82, 0x4;
