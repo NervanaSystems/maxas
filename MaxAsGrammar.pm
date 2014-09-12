@@ -378,7 +378,7 @@ push @{$grammar{$_->{op}}}, $_ foreach @grammar;
 # Create map of capture groups to op code flags that need to be added (or removed)
 my @flags = grep /\S/, split "\n", q{;
 
-BFE BFI FLO IADD IADD3 ICMP IMNMX ISCADD ISET ISETP LEA LOP LOP3 MOV PRMT SEL SHF SHL SHR XMAD
+BFE, BFI, FLO, IADD, IADD3, ICMP, IMNMX, ISCADD, ISET, ISETP, LEA, LOP, LOP3, MOV, PRMT, SEL, SHF, SHL, SHR, XMAD
 0x0100000000000000 neg
 
 FADD, FCMP, FFMA, FMNMX, FMUL, FSET, FSETP, DADD, DFMA, DMNMX, DMUL, DSET, DSETP

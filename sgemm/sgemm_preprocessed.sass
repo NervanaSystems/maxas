@@ -18,8 +18,7 @@
 <REGISTER_MAPPING>
 
 	// 64 maxtrix C output registers.
-	// Use special mapping to avoid register bank conflicts.
-	// Avoid combining any source register in an FFMA that has the same (regNum % 4) value
+	// Use special mapping to avoid register bank conflicts between these registers and the blocking registers.
 	 3, 2,11,10,19,18,27,26 : cx00y<00-03|16-19>
 	 7, 6,15,14,23,22,31,30 : cx01y<00-03|16-19>
 	 1, 0, 9, 8,17,16,25,24 : cx02y<00-03|16-19>
@@ -28,10 +27,6 @@
 	39,38,47,46,55,54,63,62 : cx33y<00-03|16-19>
 	33,32,41,40,49,48,57,56 : cx34y<00-03|16-19>
 	37,36,45,44,53,52,61,60 : cx35y<00-03|16-19>
-
-	// You can try this naive combination to see the difference (200 GFlops on GM107).
-	// 0-31 : cx00y<00-03|16-19>, cx01y<00-03|16-19>, cx02y<00-03|16-19>, cx03y<00-03|16-19>
-	//32-63 : cx32y<00-03|16-19>, cx33y<00-03|16-19>, cx34y<00-03|16-19>, cx35y<00-03|16-19>
 
 	// Double buffered register blocking
 	// Any bank conflicts that we can't avoid in these registers we can hide with .reuse flags
