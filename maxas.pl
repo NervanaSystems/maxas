@@ -30,6 +30,7 @@ if ($mode =~ /^\-?\-l/i)
 # Test that the assembler can reproduce the op codes this cubin or sass contains
 elsif ($mode =~ /^\-?\-t/i)
 {
+    my $reg  = shift if $ARGV[0] =~ /^\-?\-r/i;
     my $all  = shift if $ARGV[0] =~ /^\-?\-a/i;
     my $file = shift or usage();
     my $fh;
@@ -49,7 +50,7 @@ elsif ($mode =~ /^\-?\-t/i)
             exit(1);
         }
     }
-    exit(MaxAs::Test($fh, $all) ? 1 : 0);
+    exit(MaxAs::Test($fh, $reg, $all) ? 1 : 0);
 }
 # Extract an asm file containing the desired kernel
 elsif ($mode =~ /^\-?\-e/i)
@@ -177,9 +178,10 @@ Usage:
     maxas.pl --list|-l <cubin_file>
 
   Test a cubin or sass file to to see if the assembler can reproduce all of the contained opcodes.
-  Also useful for extending the missing grammar rules.  Defaults to only showing failures:
+  Also useful for extending the missing grammar rules.  Defaults to only showing failures without --all.
+  With the --reg flag it will show register bank conflicts not hidden by reuse flags.
 
-    maxas.pl --test|-t [--all|-a] <cubin_file | sass_file>
+    maxas.pl --test|-t [--reg|-r] [--all|-a] <cubin_file | sass_file>
 
   Extract a single kernel into an asm file from a cubin.
   Works much like cuobjdump but outputs in a format that can be re-assembled back into the cubin:
@@ -192,7 +194,6 @@ Usage:
     maxas.pl --pre|-p [--reg|-r] <asm_file> [new_asm_file]
 
   Insert the kernel asm back into the cubin.  Overwrite existing or create new cubin.
-  Also does any preprocesing required.
   Optionally you can skip register reuse flag auto insertion.  This allows you to observe
   performance without any reuse or you can use it to set the flags manually in your sass.
 

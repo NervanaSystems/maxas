@@ -15,7 +15,6 @@
 #   c[0x0][0x160]: texA (the value is 1)
 #   c[0x0][0x164]: texB (the value is 0)
 
-
 // Scheduler doesn't handle the dependency flags yet,
 // so move these first instructions outside the block that's auto scheduled
 --:-:1:-:1      S2R R118, SR_TID.X;   // Set Dep 1
@@ -34,75 +33,80 @@
 // tid32  = tid & 31
 // tid4   = (tid >> 5) & 3
 // track0 = blk*128 + tid32 + (ldx * tid4)
+// Setup 8 independent track vars so we don't need to synchronize between texture loads
+// writeS = (tid32 + tid4*128) * 4
+// writeS += 4096 if tid >= 128
 // int end = track0 + (k-8)*ldx;
-// writeS = (tid32 + tid4*128) * 4 + (4096 if B)
 // readAs and readBs are carefully constructed to avoid any bank conflicts while loading from shared
 // readAs = (((tid >> 1) & 7) | ((tid >> 7) << 4)) << 4;
 // readBs  = ((tid & 1) | ((tid >> 3) & 2) | (tid4 << 3)) << 4 + 4096;
 // Preload the first 8 lines from texture memory
-// Note the final extra stall here.  The next instruction is using the barrier right away
-// and it takes one extra clock for it to set.  Also note that the scheduler doesn't set
-// a stall amount for the last instruction.  Though be careful here as the scheduler may reorder
-// this instruction earlier.  In this case it doesn't so it's ok.
+// Break this up into two barriers so we can load 4 at a time (works faster in main loop so do here as well).
+// Keep these instructions in this order (but allow others to interleave).
+// Normally the scheduler tries to preserve source order by default, but in this case
+// the IADDs to the track variables in linear mode can make a later instruction ready before a preceeding one.
 01:-:-:Y:1      ISETP.GE.AND P0, PT, R118, 0x80, PT; // Wait Dep 1
 --:-:-:-:1      BFE.U32 R119, R118, 0x205;
 --:-:-:-:1      LOP.AND R120, R118, 0x1f;
 --:-:-:-:1      SHR.U32 R116, R118, 0x7;
---:-:-:-:1      MOV R3, c[0x0][0x14c];
---:-:-:-:1      SHR.U32 R6, R118, 0x3;
---:-:-:-:1      LOP.AND R5, R118, 0x1;
---:-:-:-:2      BFE.U32 R4, R118, 0x301;
+--:-:-:-:1      MOV R4, c[0x0][0x14c];
+--:-:-:-:1      SHR.U32 R7, R118, 0x3;
+--:-:-:-:1      LOP.AND R6, R118, 0x1;
+--:-:-:-:2      BFE.U32 R5, R118, 0x301;
 --:-:-:-:1      ISCADD R112, R119, R120, 0x7;
---:-:-:-:1      IADD R3, R3, -0x8;
+--:-:-:-:1      IADD R4, R4, -0x8;
 --:-:-:-:1      SHL R116, R116, 0x4;
---:-:-:-:1 @!P0 MOV R1, c[0x0][0x150];
+--:-:-:-:1      LOP.AND R7, R7, 0x2;
 --:-:-:-:1      SHL R117, R119, 0x3;
---:-:-:-:1  @P0 MOV R1, c[0x0][0x154];
+--:-:-:-:1 @!P0 MOV R1, c[0x0][0x150];
 --:-:-:-:1      SHL R112, R112, 0x2;
+--:-:-:-:1  @P0 MOV R1, c[0x0][0x154];
 06:-:-:-:1      SEL R0, R122, R121, P0;                // Wait Dep 2 & 3
 --:-:-:-:1 @!P0 MOV32I R115, 0x80000001; // texA
 --:-:-:-:1  @P0 MOV32I R115, 0x80000000; // texB
---:-:-:-:1      LOP.AND R6, R6, 0x2;
---:-:-:-:1      SHL R2, R1, 0x2;
---:-:-:-:1      XMAD.MRG R7, R1, R119.H1, RZ; // XMAD.LO is a macro that is expanded out into the 3 XMADs
+--:-:-:-:1      LOP.OR R116, R116, R5;
+--:-:-:-:1      LOP3.LUT R117, R117, R6, R7, 0xfe; // R117 = R117 | R6 | R7
+--:-:-:-:1      SHL R3, R1, 0x2;
+--:-:-:-:1      XMAD.MRG R8, R1, R119.H1, RZ; // XMAD.LO is a macro that is expanded out into the 3 XMADs
 --:-:-:-:1      ISCADD R104, R0, R120, 0x7;
---:-:-:-:1      XMAD.MRG R8, R3, R1.H1, RZ;
---:-:-:-:1      LOP.OR R116, R116, R4;
---:-:-:-:1      LOP3.LUT R117, R117, R5, R6, 0xfe; // R117 = R117 | R5 | R6
---:-:-:-:1      IADD R113, R2, R2;
+--:-:-:-:1      XMAD.MRG R9, R4, R1.H1, RZ;
+--:-:-:-:1      SHL R116, R116, 0x4;
 --:-:-:-:1  @P0 IADD R112, R112, 4x<1024>;
---:-:-:-:2      XMAD R104, R1, R119, R104;
---:-:-:-:2      SHL R116, R116, 0x4;
---:-:-:-:2      ISCADD R117, R117, 4x<1024>, 0x4;
---:-:-:-:2      XMAD.PSL.CBCC R104, R1.H1, R7.H1, R104;
+--:-:-:-:1      ISCADD R117, R117, 4x<1024>, 0x4;
+--:-:-:-:1      IADD R113, R3, R3;
+--:-:-:Y:6      XMAD R104, R1, R119, R104;
+--:-:-:-:2      XMAD.PSL.CBCC R104, R1.H1, R8.H1, R104;
 --:-:-:-:4      TLD.B.LZ.T R96, R104, R115, 0x0, 1D, 0x1;
 --:-:-:-:1      IADD R105, R104, 1x<32>;
 --:-:-:-:0      IADD R106, R104, 1x<64>;
 --:-:-:-:1      TLD.B.LZ.T R97, R105, R115, 0x0, 1D, 0x1;
 --:-:-:-:0      IADD R107, R104, 1x<96>;
 --:-:-:-:1      TLD.B.LZ.T R98, R106, R115, 0x0, 1D, 0x1;
---:-:-:-:0      IADD R108, R104, R2;
---:-:-:-:1      TLD.B.LZ.T R99, R107, R115, 0x0, 1D, 0x1;
---:-:-:-:0      XMAD R114, R3, R1, R104;
+--:-:-:-:0      IADD R108, R104, R3;
+--:-:1:-:1      TLD.B.LZ.P R99, R107, R115, 0x0, 1D, 0x1; // Set Dep 1
+--:-:-:-:0      XMAD R114, R4, R1, R104;
 --:-:-:-:2      TLD.B.LZ.T R100, R108, R115, 0x0, 1D, 0x1;
---:-:-:-:1      IADD R109, R105, R2;
---:-:-:-:0      IADD R110, R106, R2;
+--:-:-:-:1      IADD R109, R105, R3;
+--:-:-:-:0      IADD R110, R106, R3;
 --:-:-:-:1      TLD.B.LZ.T R101, R109, R115, 0x0, 1D, 0x1;
---:-:-:-:0      IADD R111, R107, R2;
+--:-:-:-:0      IADD R111, R107, R3;
 --:-:-:-:2      TLD.B.LZ.T R102, R110, R115, 0x0, 1D, 0x1;
---:-:-:-:0      XMAD.PSL.CBCC R114, R3.H1, R8.H1, R114;
---:-:2:Y:2      TLD.B.LZ.P R103, R111, R115, 0x0, 1D, 0x1;  // Set Dep 2, Stall 1
+--:-:-:-:0      XMAD.PSL.CBCC R114, R4.H1, R9.H1, R114;
+--:-:2:-:1      TLD.B.LZ.P R103, R111, R115, 0x0, 1D, 0x1; // Set Dep 2
 
+// These instuctions need to occur after the textures load so put them in a new block
+// that starts with a dependency barrier wait.
 // Increment tracks after the loads are complete to avoid needing write-after-read dependencies
-02:-:-:-:1      STS [R112 + 4x<000 + 00>], R96; // Wait Dep 2
---:-:-:-:0      IADD R104, R104, R113;           // Dual Issue
+// Wait for all threads to finish loading shared
+01:-:-:-:1      STS [R112 + 4x<000 + 00>], R96; // Wait Dep 1
+--:-:-:-:0      IADD R104, R104, R113;
 --:-:-:-:1      STS [R112 + 4x<000 + 32>], R97;
 --:-:-:-:0      IADD R105, R105, R113;
 --:-:-:-:1      STS [R112 + 4x<000 + 64>], R98;
 --:-:-:-:0      IADD R106, R106, R113;
 --:-:-:-:1      STS [R112 + 4x<000 + 96>], R99;
 --:-:-:-:0      IADD R107, R107, R113;
---:-:-:-:1      STS [R112 + 4x<512 + 00>], R100;
+02:-:-:-:1      STS [R112 + 4x<512 + 00>], R100; // Wait Dep 2
 --:-:-:-:0      IADD R108, R108, R113;
 --:-:-:-:1      STS [R112 + 4x<512 + 32>], R101;
 --:-:-:-:0      IADD R109, R109, R113;
@@ -110,14 +114,7 @@
 --:-:-:-:0      IADD R110, R110, R113;
 --:-:-:-:1      STS [R112 + 4x<512 + 96>], R103;
 --:-:-:-:0      IADD R111, R111, R113;
-
-// Wait for all threads to finish loading shared
 --:-:-:-:5      BAR.SYNC 0x0;
-
-// Next write to shared goes to high area.
-// Having 2 share buffers allows us to eliminate a bar.sync in the main loop
-// Must go after BAR.SYNC to avoid needing WaR dep
---:-:-:-:1      LOP.XOR R112, R112, 4x<2048>;
 
 // Preload the fist lines of A and B from shared
 // Initialize C registeres to zero
@@ -191,6 +188,10 @@
 --:-:-:-:1      MOV R26, RZ;
 --:-:-:-:1      MOV R24, RZ;
 
+// Next store to shared goes to high area.
+// Having 2 share buffers allows us to eliminate a bar.sync in the main loop
+--:-:-:-:1      LOP.XOR R112, R112, 4x<2048>;
+
 // The main loop
 // While calculating the first line, load in the next line from shared.
 // Shared memory stores enough to do this 8 times per loop.
@@ -212,7 +213,6 @@ LOOP:
 
 // Loop end condition
 --:-:-:-:1      ISETP.LE.AND P0, PT, R104, R114, PT;
-
 01:-:-:-:0      FFMA R1, R66, R72, R1; // Wait Dep 1
 --:-:-:-:1      LDS.U.128 R80, [R116 + 4x<1*128 + 00>];
 --:-:-:-:1      FFMA R3, R64, R72, R3;
@@ -761,30 +761,30 @@ LOOP:
 --:-:-:-:1      FFMA R53, R87, R92, R53;
 --:-:-:-:1      FFMA R54, R85, R93, R54;
 --:-:-:-:1      FFMA R52, R87, R93, R52;
---:-:-:-:1  @P0 IADD R104, R104, R113;
 --:-:-:-:1      FFMA R63, R85, R94, R63;
 --:-:-:-:1      FFMA R61, R87, R94, R61;
---:-:-:-:1  @P0 IADD R105, R105, R113;
 --:-:-:-:1      FFMA R62, R85, R95, R62;
 --:-:-:-:1      FFMA R60, R87, R95, R60;
---:-:-:-:1  @P0 IADD R106, R106, R113;
 --:-:-:-:1      FFMA R59, R84, R94, R59;
 --:-:-:-:1      FFMA R57, R86, R94, R57;
---:-:-:-:1  @P0 IADD R107, R107, R113;
 --:-:-:-:1      FFMA R58, R84, R95, R58;
 --:-:-:-:1      FFMA R56, R86, R95, R56;
---:-:-:-:1  @P0 IADD R108, R108, R113;
 --:-:-:-:1      FFMA R31, R81, R94, R31;
 --:-:-:-:1      FFMA R29, R83, R94, R29;
---:-:-:-:1  @P0 IADD R109, R109, R113;
 --:-:-:-:1      FFMA R30, R81, R95, R30;
 --:-:-:-:1      FFMA R28, R83, R95, R28;
---:-:-:-:1  @P0 IADD R110, R110, R113;
 --:-:-:-:1      FFMA R27, R80, R94, R27;
 --:-:-:-:1      FFMA R25, R82, R94, R25;
---:-:-:-:1  @P0 IADD R111, R111, R113;
 --:-:-:-:1      FFMA R26, R80, R95, R26;
 --:-:-:-:1      FFMA R24, R82, R95, R24;
+--:-:-:-:1  @P0 IADD R104, R104, R113;
+--:-:-:-:1  @P0 IADD R105, R105, R113;
+--:-:-:-:1  @P0 IADD R106, R106, R113;
+--:-:-:-:1  @P0 IADD R107, R107, R113;
+--:-:-:-:1  @P0 IADD R108, R108, R113;
+--:-:-:-:1  @P0 IADD R109, R109, R113;
+--:-:-:-:1  @P0 IADD R110, R110, R113;
+--:-:-:-:0  @P0 IADD R111, R111, R113;
 --:-:-:Y:5  @P0 BRA LOOP;
 
 // Main loop is done, time to write C to global memory.
@@ -856,9 +856,7 @@ LOOP:
 --:-:-:-:4      IADD R74, R74, -R83;
 --:-:-:-:1      IADD R75, R75, -R83;
 
-
-
-# Note CODE sections can appear inside of scheduled blocks, I just don't choose to in this example.
+// No need to schedule this section
 
 --:-:-:-:1      MOV R64, R3;
 --:-:-:-:1      MOV R65, R7;
@@ -867,7 +865,7 @@ LOOP:
 --:-:-:-:1      MOV R68, R35;
 --:-:-:-:1      MOV R69, R39;
 --:-:-:-:1      MOV R70, R33;
---:-:-:-:1      MOV R71, R37;
+--:-:-:-:0      MOV R71, R37; // Dual Issue
 --:-:-:-:5      CAL STORE_C;
 
 02:-:-:-:1      MOV R64, R2; // Wait Dep 2
@@ -877,7 +875,7 @@ LOOP:
 --:-:-:-:1      MOV R68, R34;
 --:-:-:-:1      MOV R69, R38;
 --:-:-:-:1      MOV R70, R32;
---:-:-:-:1      MOV R71, R36;
+--:-:-:-:0      MOV R71, R36; // Dual Issue
 --:-:-:-:5      CAL STORE_C;
 
 02:-:-:-:1      MOV R64, R11; // Wait Dep 2
@@ -887,7 +885,7 @@ LOOP:
 --:-:-:-:1      MOV R68, R43;
 --:-:-:-:1      MOV R69, R47;
 --:-:-:-:1      MOV R70, R41;
---:-:-:-:1      MOV R71, R45;
+--:-:-:-:0      MOV R71, R45; // Dual Issue
 --:-:-:-:5      CAL STORE_C;
 
 02:-:-:-:1      MOV R64, R10; // Wait Dep 2
@@ -897,7 +895,7 @@ LOOP:
 --:-:-:-:1      MOV R68, R42;
 --:-:-:-:1      MOV R69, R46;
 --:-:-:-:1      MOV R70, R40;
---:-:-:-:1      MOV R71, R44;
+--:-:-:-:0      MOV R71, R44; // Dual Issue
 --:-:-:-:5      CAL STORE_C;
 
 --:-:-:-:1      IADD R76, R76, 0xc;
@@ -917,7 +915,7 @@ LOOP:
 --:-:-:-:1      MOV R68, R51;
 --:-:-:-:1      MOV R69, R55;
 --:-:-:-:1      MOV R70, R49;
---:-:-:-:1      MOV R71, R53;
+--:-:-:-:0      MOV R71, R53; // Dual Issue
 --:-:-:-:5      CAL STORE_C;
 
 02:-:-:-:1      MOV R64, R18; // Wait Dep 2
@@ -927,7 +925,7 @@ LOOP:
 --:-:-:-:1      MOV R68, R50;
 --:-:-:-:1      MOV R69, R54;
 --:-:-:-:1      MOV R70, R48;
---:-:-:-:1      MOV R71, R52;
+--:-:-:-:0      MOV R71, R52; // Dual Issue
 --:-:-:-:5      CAL STORE_C;
 
 02:-:-:-:1      MOV R64, R27; // Wait Dep 2
@@ -937,7 +935,7 @@ LOOP:
 --:-:-:-:1      MOV R68, R59;
 --:-:-:-:1      MOV R69, R63;
 --:-:-:-:1      MOV R70, R57;
---:-:-:-:1      MOV R71, R61;
+--:-:-:-:0      MOV R71, R61; // Dual Issue
 --:-:-:-:5      CAL STORE_C;
 
 02:-:-:-:1      MOV R64, R26; // Wait Dep 2
@@ -947,9 +945,10 @@ LOOP:
 --:-:-:-:1      MOV R68, R58;
 --:-:-:-:1      MOV R69, R62;
 --:-:-:-:1      MOV R70, R56;
---:-:-:-:1      MOV R71, R60;
+--:-:-:-:0      MOV R71, R60; // Dual Issue
 --:-:-:-:5      CAL STORE_C;
 
+// And we'd done.  The remainder is the STORE_C method that's defined at the end of the kernel.
 --:-:-:-:5      EXIT;
 
 // This routine does warp synchronous shuffling of our output data so as to be able
@@ -958,7 +957,6 @@ LOOP:
 // The SHFL instruction doesn't help us here because we're swaping different registers
 // from different threads.
 STORE_C:
-
 // Each warp writes to its own region of memory so we don't need to bar.sync the access.
 // There are some bank conflicts here but no way to avoid them, and the hit just means a few extra clocks.
 // Note here that the scheduler is able to handle the dependencies between vector and non-vector instructions.
@@ -985,7 +983,7 @@ STORE_C:
 --:-:-:-:1      ISETP.LT.AND P1, PT, R76, R81, P6;
 --:-:1:-:1      LDS R71, [R88 + 4x<3*128 + 32>]; // Set Dep 1
 --:-:-:-:2      ISETP.LT.AND P2, PT, R77, R81, P5;
---:-:-:Y:6      ISETP.LT.AND P3, PT, R77, R81, P6;
+--:-:-:Y:7      ISETP.LT.AND P3, PT, R77, R81, P6;
 01:-:-:-:1  @P0 STG.CG [R72 + 4x<00>], R64; // Wait Dep 1
 --:-:-:-:1      ISETP.LT.AND P0, PT, R78, R81, P5;
 --:-:-:-:1  @P1 STG.CG [R72 + 4x<32>], R65;
@@ -993,7 +991,7 @@ STORE_C:
 --:-:-:-:1  @P2 STG.CG [R73 + 4x<00>], R66;
 --:-:-:-:1      ISETP.LT.AND P2, PT, R79, R81, P5;
 --:-:-:-:1  @P3 STG.CG [R73 + 4x<32>], R67;
---:-:-:Y:6      ISETP.LT.AND P3, PT, R79, R81, P6;
+--:-:-:Y:7      ISETP.LT.AND P3, PT, R79, R81, P6;
 --:-:-:-:2  @P0 STG.CG [R74 + 4x<00>], R68;
 --:-:-:-:2  @P1 STG.CG [R74 + 4x<32>], R69;
 --:-:-:-:2  @P2 STG.CG [R75 + 4x<00>], R70;

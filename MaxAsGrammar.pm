@@ -217,7 +217,7 @@ my $shflT = {class => 'shfl',  lat => 2,   blat => 50,  rlat => 0, rhold => 20, 
 my $x32T  = {class => 'x32',   lat => 6,   blat => 0,   rlat => 0, rhold => 0,  tput => 1,   dual => 0, reuse => 1};
 my $x64T  = {class => 'x64',   lat => 2,   blat => 128, rlat => 0, rhold => 0,  tput => 128, dual => 0, reuse => 1};
 my $shftT = {class => 'shift', lat => 6,   blat => 0,   rlat => 0, rhold => 0,  tput => 2,   dual => 0, reuse => 1};
-my $cmpT  = {class => 'cmp',   lat => 12,  blat => 0,   rlat => 0, rhold => 0,  tput => 2,   dual => 0, reuse => 1};
+my $cmpT  = {class => 'cmp',   lat => 13,  blat => 0,   rlat => 0, rhold => 0,  tput => 2,   dual => 0, reuse => 1};
 my $qtrT  = {class => 'qtr',   lat => 13,  blat => 0,   rlat => 0, rhold => 0,  tput => 4,   dual => 0, reuse => 0};
 my $rroT  = {class => 'rro',   lat => 2,   blat => 0,   rlat => 0, rhold => 0,  tput => 1,   dual => 0, reuse => 0};
 
@@ -368,15 +368,15 @@ our %grammar =
     BPT    => [ { type => $x32T, code => 0xe3a00000000000c0, rule => qr"^$noPred?BPT\.TRAP $i20w24;"o,           } ],
 
     #Miscellaneous Instructions
-    NOP    => [ { type => $x32T, code => 0x50b0000000000f00, rule => qr"^$pred?NOP;"o,                                     } ],
-    CS2R   => [ { type => $x32T, code => 0x50c8000000000000, rule => qr"^$pred?CS2R $r0, $sr;"o,                           } ],
-    S2R    => [ { type => $s2rT, code => 0xf0c8000000000000, rule => qr"^$pred?S2R $r0, $sr;"o,                            } ],
-    B2R    => [ { type => $x32T, code => 0xf0b800010000ff00, rule => qr"^$pred?B2R$b2r;"o,                                 } ],
-    BAR    => [ { type => $x32T, code => 0xf0a8000000000000, rule => qr"^$pred?BAR$bar;"o,                                 } ],
-    DEPBAR => [ { type => $x32T, code => 0xf0f0000000000000, rule => qr"^$pred?DEPBAR$dbar;"o,                             } ],
-    MEMBAR => [ { type => $x32T, code => 0xef98000000000000, rule => qr"^$pred?MEMBAR$mbar;"o,                             } ],
-    VOTE   => [ { type => $x32T, code => 0x50d8000000000000, rule => qr"^$pred?VOTE$vote (?:$r0, |(?<nor0>))$p45, $p39;"o, } ],
-    R2B    => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?R2B.*?;"o,                                  } ], #TODO
+    NOP    => [ { type => $x32T,  code => 0x50b0000000000f00, rule => qr"^$pred?NOP;"o,                                     } ],
+    CS2R   => [ { type => $x32T,  code => 0x50c8000000000000, rule => qr"^$pred?CS2R $r0, $sr;"o,                           } ],
+    S2R    => [ { type => $s2rT,  code => 0xf0c8000000000000, rule => qr"^$pred?S2R $r0, $sr;"o,                            } ],
+    B2R    => [ { type => $x32T,  code => 0xf0b800010000ff00, rule => qr"^$pred?B2R$b2r;"o,                                 } ],
+    BAR    => [ { type => $gmemT, code => 0xf0a8000000000000, rule => qr"^$pred?BAR$bar;"o,                                 } ],
+    DEPBAR => [ { type => $x32T,  code => 0xf0f0000000000000, rule => qr"^$pred?DEPBAR$dbar;"o,                             } ],
+    MEMBAR => [ { type => $x32T,  code => 0xef98000000000000, rule => qr"^$pred?MEMBAR$mbar;"o,                             } ],
+    VOTE   => [ { type => $x32T,  code => 0x50d8000000000000, rule => qr"^$pred?VOTE$vote (?:$r0, |(?<nor0>))$p45, $p39;"o, } ],
+    R2B    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?R2B.*?;"o,                                  } ], #TODO
 
     #Video Instructions... TODO
     # Quick and dirty VADD for now.  Just added to get 100% cublas_device.lib coverage.
@@ -876,46 +876,45 @@ my %reuseCodes = (reuse1 => 1, reuse2 => 2, reuse3 => 4);
 # if you pass in a test array ref it will populate it with the matching capture groups
 sub genCode
 {
-    my ($op, $grammar, $test) = @_;
+    my ($op, $grammar, $capData, $test) = @_;
 
-    my %capData   = %+; # mutable copy, also allows for additional regexes within this function
     my $flags     = $flags{$op};
     my $code      = $grammar->{code};
     my $reuse     = 0;
     my $immedCode = $immedCodes{$code >> 56};
 
-    #print map "$_: $capData{$_}\n", keys %capData if $op eq 'I2I';
+    #print map "$_: $capData->{$_}\n", keys %capData if $op eq 'I2I';
 
     # process the instruction predicate (if valid for this instuction)
-    if (exists $capData{noPred})
+    if (exists $capData->{noPred})
     {
-        delete $capData{noPred};
+        delete $capData->{noPred};
         push @$test, 'noPred' if $test;
     }
     else
     {
-        my $p = defined($capData{predNum}) ? $capData{predNum} : 7;
+        my $p = defined($capData->{predNum}) ? $capData->{predNum} : 7;
         push @$test, 'predNum' if $test;
-        if (exists $capData{predNot})
+        if (exists $capData->{predNot})
         {
             $p |= 8;
             push @$test, 'predNot' if $test;
         }
         $code ^= $p << 16;
-        delete @capData{qw(predNum predNot)};
+        delete @{$capData}{qw(predNum predNot)};
 
     }
     # process the register reuse flags
     foreach my $rcode (qw(reuse1 reuse2 reuse3))
     {
-        if (delete $capData{$rcode})
+        if (delete $capData->{$rcode})
         {
             $reuse |= $reuseCodes{$rcode};
             push @$test, $rcode if $test;
         }
     }
 
-    foreach my $capture (keys %capData)
+    foreach my $capture (keys %$capData)
     {
         # change the base code for immediate versions of the op
         if (exists $immedOps{$capture})
@@ -927,7 +926,7 @@ sub genCode
         # if capture group is an operand then process and add that data to code
         if (exists $operands{$capture})
         {
-            $code ^= $operands{$capture}->($capData{$capture});
+            $code ^= $operands{$capture}->($capData->{$capture});
             push @$test, $capture if $test;
         }
 
@@ -937,8 +936,8 @@ sub genCode
             # a named multivalue flag
             if (ref $flags->{$capture})
             {
-                $code ^= $flags->{$capture}{$capData{$capture}};
-                push @$test, "$capture:$capData{$capture}" if $test;
+                $code ^= $flags->{$capture}{$capData->{$capture}};
+                push @$test, "$capture:$capData->{$capture}" if $test;
             }
             # a simple exists flag
             else
@@ -950,7 +949,7 @@ sub genCode
         elsif (!exists $operands{$capture} && !$test)
         {
             # Every capture group should be acted upon.  Missing one is a bug.
-            warn "UNUSED: $op: $capture: $capData{$capture}\n";
+            warn "UNUSED: $op: $capture: $capData->{$capture}\n";
             warn Dumper($flags);
         }
     }

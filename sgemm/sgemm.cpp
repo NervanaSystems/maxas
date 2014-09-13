@@ -96,11 +96,17 @@ int main(int argc, char* argv[])
 	float* C = (float*)malloc(size);
 	float* T = (float*)malloc(size);
 
+	//memset(A, 0, size);
+	//memset(B, 0, size); 
+
+	int counter = 0;
 	srand((unsigned int)time(0));
-	for(int i = 0; i < N * N; i++)
+	for(int i = 0; i < N * N; i++) //
 	{
-		A[i] = (float)rand() / (float)RAND_MAX;
-		B[i] = (float)rand() / (float)RAND_MAX;
+		A[i] = 1.0f;//(float)rand() / (float)RAND_MAX;
+		B[i] = 1.0f;//(float)rand() / (float)RAND_MAX;
+		//A[i] = 1.0f;
+		//B[i * N + counter++] = 1.0f; // identity matrix
 	}
 
 	CUDA_CHECK( cuCtxCreate(&hContext, 0, hDevice) );
@@ -120,7 +126,7 @@ int main(int argc, char* argv[])
 	CUDA_CHECK( cuMemsetD8(devT, 0, size) );
 	
 	// Warm up the clock (unless under nsight)
-	if (!getenv("NSIGHT_LAUNCHED") && !getenv("NSIGHT_CUDA_DEBUGGER")) // NSIGHT_CUDA_ANALYSIS NSIGHT_CUDA_DEBUGGER 
+	if (!getenv("NSIGHT_LAUNCHED")) // NSIGHT_CUDA_ANALYSIS NSIGHT_CUDA_DEBUGGER 
 		for (int i = 0; i < 3; i++)
 			CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
 
@@ -129,13 +135,13 @@ int main(int argc, char* argv[])
 	gflops("MaxAs ", N, ms, repeat);
 
 	// Run cublas again for the same repeat count for comparison
-	//CUDA_CHECK( cuEventRecord(hStart, NULL) );
-	//for (int i = 0; i < repeat; i++)
-	//	CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
-	//CUDA_CHECK( cuEventRecord(hStop, NULL) );
-	//CUDA_CHECK( cuEventSynchronize(hStop) );
-	//CUDA_CHECK( cuEventElapsedTime(&ms, hStart, hStop) );
-	//gflops("Cublas", N, ms, repeat);
+	CUDA_CHECK( cuEventRecord(hStart, NULL) );
+	for (int i = 0; i < repeat; i++)
+		CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
+	CUDA_CHECK( cuEventRecord(hStop, NULL) );
+	CUDA_CHECK( cuEventSynchronize(hStop) );
+	CUDA_CHECK( cuEventElapsedTime(&ms, hStart, hStop) );
+	gflops("Cublas", N, ms, repeat);
 
 	// Get back our results from each kernel
 	CUDA_CHECK( cuMemcpyDtoH(C, devC, size) );
@@ -273,7 +279,7 @@ void test(float* C, float* T, int N, size_t size)
 {
 	// Compare our implementation with the cublas result
 	int errors = memcmp(C, T, size);
-	if (errors != 0)
+	if (errors)
 	{
 		if (N <= 768) // This gets too big and slow for large N
 		{
@@ -290,14 +296,15 @@ void test(float* C, float* T, int N, size_t size)
 						if (c != t)
 						{
 							errors++;
-							//printf("%d,%d: %.8f,%.8f\n", x,y, c, t);
-							fprintf(file, "%.0f!%.0f\t", c ,t, c);
-							//fprintf(file, "!\t");
+							//fprintf(file, "%.0f!%.0f\t", c , t);
+							//fprintf(file, "%.0f!", c);
+							fprintf(file, "!");
 						}
 						else
 						{
-							fprintf(file, "%.0f=%.0f\t", c ,t, c);
-							//fprintf(file, "=\t");
+							//fprintf(file, "%.0f=%.0f\t", c , t);
+							//fprintf(file, "%.0f=", c);
+							fprintf(file, "=");
 						}
 					}
 					fprintf(file, "\n");

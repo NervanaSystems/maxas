@@ -111,15 +111,18 @@ sub Assemble
             # Apply the rule pattern
             next unless $inst =~ $gram->{rule};
 
+            # create mutable copy of capture data that isn't destroyed on subsequent capturing pattern match
+            my %capData = %+;
+
             # get any vector registers for r0
-            my @r0 = exists($+{r0}) ? getVecRegisters($+{r0}, $+{type}) : ();
+            my @r0 = exists($capData{r0}) ? getVecRegisters($capData{r0}, $capData{type}) : ();
 
             # update the register count
             foreach my $r (qw(r0 r8 r20 r39))
             {
-                if (exists($+{$r}) && $+{$r} ne 'RZ')
+                if (exists($capData{$r}) && $capData{$r} ne 'RZ')
                 {
-                    my $val = substr $+{$r}, 1;
+                    my $val = substr $capData{$r}, 1;
 
                     my $regInc = $r eq 'r0' ? scalar(@r0) : 1;
 
@@ -131,12 +134,12 @@ sub Assemble
             # update the barrier resource count
             if ($op eq 'BAR')
             {
-                if (exists $+{i8w4})
+                if (exists $capData{i8w4})
                 {
-                    $barCnt = $+{i8w4}+1 if $+{i8w4}+1 > $barCnt;
+                    $barCnt = $capData{i8w4}+1 if $capData{i8w4}+1 > $barCnt;
                 }
                 # if a barrier value is a register, assume the maximum
-                elsif (exists $+{r8})
+                elsif (exists $capData{r8})
                 {
                     $barCnt = 16;
                 }
@@ -165,11 +168,11 @@ sub Assemble
                 {
                     foreach my $slot (keys %reuseSlots)
                     {
-                        next unless exists $+{$slot};
+                        next unless exists $capData{$slot};
 
-                        my $r = $+{$slot};
+                        my $r = $capData{$slot};
                         next if $r eq 'RZ';
-                        next if $r eq $+{r0}; # dont reuse if we're writing this reg in the same instruction
+                        next if $r eq $capData{r0}; # dont reuse if we're writing this reg in the same instruction
 
                         my $reuse = $reuse{$slot} ||= {};
 
@@ -194,7 +197,7 @@ sub Assemble
             # Generate the op code.  Note that we also get a reuse code back.
             # For some instruction types this is overloaded for a different purpose.
             # We want to keep that value.  Otherwise we'll overwrite with the above calculated value (on the final pass).
-            my ($code, $reuse) = genCode($op, $gram);
+            my ($code, $reuse) = genCode($op, $gram, \%capData);
 
             $instructs[$i]{code} = $code;
             push @{$ctrl->{reuse}}, $reuse;
@@ -259,10 +262,11 @@ sub Assemble
 # Useful for testing op code coverage of existing code, extracting new codes and flags
 sub Test
 {
-    my ($fh, $all) = @_;
+    my ($fh, $bankConflicts, $all) = @_;
 
     my @instructs;
     my ($pass, $fail) = (0,0);
+    my %reuseHistory  = (r8 => {}, r20 => {}, r39 => {});
 
     while (my $line = <$fh>)
     {
@@ -285,13 +289,56 @@ sub Test
                 $inst->{inst} =~ s/(0x[0-9a-f]+)/sprintf '0x%06x', ((hex($1) - $inst->{num} - 8) & 0xffffff)/e;
             }
 
+
             my $match = 0;
             foreach my $gram (@{$grammar{$inst->{op}}})
             {
                 if ($inst->{inst} =~ $gram->{rule})
                 {
                     my @caps;
-                    my ($code, $reuse) = genCode($inst->{op}, $gram, \@caps);
+                    my %capData = %+;
+
+                    # Run in test mode to list what capture groups were captured
+                    my ($code, $reuse) = genCode($inst->{op}, $gram, \%capData, \@caps);
+
+                    # Detect register bank conflicts but only for reuse type instructions.
+                    # If a bank conflict is avoided by a reuse flag then ignore it.
+                    if ($bankConflicts && $gram->{type}{reuse})
+                    {
+                        my (@banks, @conflicts);
+
+                        foreach my $slot (qw(r8 r20 r39))
+                        {
+                            my $r = $capData{$slot} or next;
+                            next if $r eq 'RZ';
+                            my $slotHist = $reuseHistory{$slot};
+
+                            # if this register is in active reuse then ignore for bank conflict checking.
+                            if (!exists $slotHist->{$r})
+                            {
+                                # extract number from reg and take the modulo-4 value.  This is the bank id.
+                                my $bank = substr($r,1) & 3;
+
+                                # check for conflict
+                                if ($banks[$bank] && $banks[$bank] ne $r)
+                                {
+                                    push @conflicts, $banks[$bank] if !@conflicts;
+                                    push @conflicts, $r;
+                                }
+                                $banks[$bank] = $r;
+                            }
+
+                            # update the history
+                            if ($reuse & $reuseSlots{$slot})
+                                { $slotHist->{$r} = 1; }
+                            else
+                                { delete $slotHist->{$r};  }
+                        }
+                        if (@conflicts)
+                        {
+                            printf "CONFLICT at 0x%04x (%s): $inst->{inst}\n", $inst->{num}, join(',', @conflicts);
+                        }
+                    }
 
                     $inst->{caps}      = join ', ', sort @caps;
                     $inst->{codeDiff}  = $fileCode  ^ $code;
@@ -346,7 +393,8 @@ sub Test
         }
         printf $template, @{$inst}{qw(grade code reuse codeDiff reuseDiff pred ins caps)};
     }
-    print "\nTotals: Pass: $pass Fail: $fail\n";
+    print "\nOp Code Coverage Totals: Pass: $pass Fail: $fail\n";
+
     return $fail;
 }
 
@@ -402,38 +450,43 @@ sub Extract
     }
 }
 
+my $CommentRe  = qr'^\s*<COMMENT>.*?^\s*</COMMENT>\n?'ms;
+my $CodeRe     = qr'^\s*<CODE>(.*?)^\s*<\/CODE>\n?'ms;
+my $RegMapRe   = qr'^\s*<REGISTER_MAPPING>(.*?)^\s*</REGISTER_MAPPING>\n?'ms;
+my $ScheduleRe = qr'^\s*<SCHEDULE_BLOCK>(.*?)^\s*</SCHEDULE_BLOCK>\n?'ms;
+
 sub Preprocess
 {
     my ($file, $doReg) = @_;
 
     # Strip out comments
-    $file =~ s|^<COMMENT>.*?^</COMMENT>\n?||gms;
+    $file =~ s|$CommentRe||g;
+
+    # Execute the CODE sections
+    $file =~ s|$CodeRe| eval "package MaxAs::CODE; $1" or die "CODE:\n$1\n\nError: $@\n" |eg;
 
     # Pull in the reg map first as the Scheduler will need it to handle vector instructions
-    $file =~ m'^<REGISTER_MAPPING>(.*?)^</REGISTER_MAPPING>'ms;
+    $file =~ $RegMapRe;
 
     my $regMap = getRegisterMap($file, $1);
 
-    # Execute the CODE sections
-    $file =~ s/^<CODE>(.*?)^<\/CODE>\n?/my $r = eval "package MaxAs::CODE; $1"; $r || die "CODE:\n$1\n\nError: $@\n"/egms;
-
-    # XMAD macros:
-    $file = replaceXMADs($file);
-
     # Pick out the SCHEDULE_BLOCK sections
-    my @schedBlocks = $file =~ m'^<SCHEDULE_BLOCK>(.*?)^</SCHEDULE_BLOCK>'gms;
+    my @schedBlocks = $file =~ /$ScheduleRe/g;
 
     # Schedule them
     foreach my $i (0 .. $#schedBlocks)
     {
+        # XMAD macros should only appear in SCHEDULE_BLOCKs
+        $schedBlocks[$i] = replaceXMADs($schedBlocks[$i]);
+
         $schedBlocks[$i] = Scheduler($schedBlocks[$i], $i+1, $regMap);
     }
 
     # Replace the results
-    $file =~ s|^<SCHEDULE_BLOCK>(.*?)^</SCHEDULE_BLOCK>\n?| shift @schedBlocks |egms;
+    $file =~ s|$ScheduleRe| shift @schedBlocks |eg;
 
     # Do the regmapping stage if requested
-    if ($doReg && $file =~ s|^<REGISTER_MAPPING>(.*?)^</REGISTER_MAPPING>\n?||ms)
+    if ($doReg && $file =~ s|$RegMapRe||)
     {
         my $out;
         foreach my $line (split "\n", $file)
@@ -473,7 +526,7 @@ sub Scheduler
 
     my $lineNum = 0;
 
-    my (@instructs, @comments);
+    my (@instructs, @comments, $ordered);
     foreach my $line (split "\n", $block)
     {
         # keep track of line nums in the physical file
@@ -489,6 +542,7 @@ sub Scheduler
         if (my $inst = processAsmLine($line, $lineNum))
         {
             $inst->{exeTime} = 0;
+            $inst->{order}   = $ordered++ if $ordered;
             push @instructs, $inst;
         }
         # match a label
@@ -496,13 +550,25 @@ sub Scheduler
         {
             die "SCHEDULE_BLOCK's cannot contain labels. block: $blockNum line: $lineNum\n";
         }
+        # open an ORDERED block
+        elsif ($line =~ m'^<ORDERED>')
+        {
+            die "you cannot use nested <ORDERED> tags" if $ordered;
+            $ordered = 1;
+        }
+        # close an ORDERED block
+        elsif ($line =~ m'^</ORDERED>')
+        {
+            die "missing opening <ORDERED> for closing </ORDERED> tag" if !$ordered;
+            $ordered = 0;
+        }
         else
         {
             die "badly formed line at block: $blockNum line: $lineNum: $line\n";
         }
     }
 
-    my (%writes, %reads, @ready, @schedule);
+    my (%writes, %reads, @ready, @schedule, $orderedParent);
     # assemble the instructions to op codes
     foreach my $instruct (@instructs)
     {
@@ -585,6 +651,19 @@ sub Scheduler
                     # subsequently reading it in some way prior to writing it again.
                     delete $reads{$dest} unless $instruct->{pred};
                 }
+
+                # Enforce instruction ordering where requested
+                if ($instruct->{order})
+                {
+                    if ($orderedParent)
+                    {
+                        push @{$orderedParent->{children}}, [$instruct, 0];
+                        $instruct->{parents}++;
+                    }
+                    $orderedParent = $instruct;
+                }
+                elsif ($orderedParent)
+                    {  $orderedParent = 0; }
 
                 # For a dest reg, push it onto the write stack
                 unshift @{$writes{$_}}, $instruct foreach @dest;
@@ -836,7 +915,7 @@ sub replaceXMADs
     # XMAD.MRG x, a, b.H1, RZ;
     # XMAD d, a, b, c;
     # XMAD.PSL.CBCC d, a.H1, x.H1, d;
-    $file =~ s/\n$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>\w+)\s*,\s*(?<c>\w+)\s*,\s*(?<x>\w+)\s*;$CommRe/
+    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>\w+)\s*,\s*(?<c>\w+)\s*,\s*(?<x>\w+)\s*;$CommRe/
 
         sprintf '
 %1$s%2$s%3$sXMAD.MRG %8$s, %5$s, %6$s.H1, RZ;%9$s

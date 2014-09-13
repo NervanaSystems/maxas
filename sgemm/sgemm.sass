@@ -40,7 +40,7 @@
     104-127 : track<0-7>, writeS, ldx8, end, tex, readAs, readBs, tid, tid4, tid32, bx, by
 
     // Temporary registers to calculate the state registers. Reuse the C output registers.
-    0-63    : blk, ldx, ldx4, k, val<0-2>, xmad<0-1>
+    0-63    : blk, ldx, ldx2, ldx4, k, val<0-2>, xmad<0-1>, tid128
 
     // Registers to store the results back to global memory. Reuse any register not needed after the main loop.
     64-79   : cs<0-7>, Cy00, Cy04, Cy08, Cy12, cy00, cy04, cy08, cy12
@@ -73,33 +73,75 @@
 
 // ldx4 = ldx * 4;
 // ldx8 = ldx * 8;
---:-:-:-:1      SHL ldx4, ldx, 0x2;
+--:-:-:-:1      SHL  ldx4, ldx, 0x2;
 --:-:-:-:1      IADD ldx8, ldx4, ldx4;
 
 // tid32  = tid & 31
 // tid4   = (tid >> 5) & 3
-// track0 = blk*128 + tid32 + (ldx * tid4)
 --:-:-:-:1      LOP.AND tid32,  tid, 0x1f;
 --:-:-:-:1      BFE.U32 tid4,   tid, 0x205;
---:-:-:-:1      ISCADD  track0, blk, tid32, 0x7;
---:-:-:-:1      XMAD.LO track0, ldx, tid4,  track0, xmad0; // XMAD.LO is a macro that is expanded out into the 3 XMADs
---:-:-:-:1      IADD track1, track0, 1x<32>;
---:-:-:-:1      IADD track2, track0, 1x<64>;
---:-:-:-:1      IADD track3, track0, 1x<96>;
---:-:-:-:1      IADD track4, track0, ldx4;
---:-:-:-:1      IADD track5, track1, ldx4;
---:-:-:-:1      IADD track6, track2, ldx4;
---:-:-:-:1      IADD track7, track3, ldx4;
+
+<CODE>
+
+    # Test two alternate means of loading from textures.
+    # Block mode is only 3 Gflops faster but this is more for showing what you can do with code sections.
+    our $mode = 'block';
+
+    # Linear Mode: 128 threads load and store straight across
+    if ($mode eq 'linear')
+    {
+        return q|
+            // ldx2   = ldx * 2;
+            // tid128 = tid & 127;
+            // track0 = blk*128 + tid128;
+            --:-:-:-:1      IADD ldx2, ldx, ldx;
+            --:-:-:-:1      LOP.AND tid128, tid, 0x7f;
+            --:-:-:-:1      ISCADD  track0, blk, tid128, 0x7;
+
+            // Setup 8 independent track vars so we don't need to synchronize between texture loads
+            --:-:-:-:1      IADD track1, track0, ldx;
+            --:-:-:-:1      IADD track2, track0, ldx2;
+            --:-:-:-:1      IADD track3, track1, ldx2;
+            --:-:-:-:1      IADD track4, track0, ldx4;
+            --:-:-:-:1      IADD track5, track1, ldx4;
+            --:-:-:-:1      IADD track6, track2, ldx4;
+            --:-:-:-:1      IADD track7, track3, ldx4;
+
+            // writeS = tid128 * 4
+            --:-:-:-:1      SHL  writeS, tid128, 0x2;
+        |;
+    }
+    # Block Mode: 4 groups of 32 threads stacked on top of each other
+    else
+    {
+        return q|
+            // track0 = blk*128 + tid32 + (ldx * tid4)
+            --:-:-:-:1      ISCADD  track0, blk, tid32, 0x7;
+            --:-:-:-:1      XMAD.LO track0, ldx, tid4,  track0, xmad0; // XMAD.LO is a macro that is expanded out into the 3 XMADs
+
+            // Setup 8 independent track vars so we don't need to synchronize between texture loads
+            --:-:-:-:1      IADD track1, track0, 1x<32>;
+            --:-:-:-:1      IADD track2, track0, 1x<64>;
+            --:-:-:-:1      IADD track3, track0, 1x<96>;
+            --:-:-:-:1      IADD track4, track0, ldx4;
+            --:-:-:-:1      IADD track5, track1, ldx4;
+            --:-:-:-:1      IADD track6, track2, ldx4;
+            --:-:-:-:1      IADD track7, track3, ldx4;
+
+            // writeS = (tid32 + tid4*128) * 4
+            --:-:-:-:1      ISCADD writeS, tid4,   tid32, 0x7;
+            --:-:-:-:1      SHL    writeS, writeS, 0x2;
+        |;
+    }
+</CODE>
+
+// writeS += 4096 if tid >= 128
+--:-:-:-:1  @P0 IADD   writeS, writeS, 4x<1024>;
 
 // int end = track0 + (k-8)*ldx;
 --:-:-:-:1      MOV k, c[0x0][0x14c];
 --:-:-:-:1      IADD k, k, -0x8;
 --:-:-:-:1      XMAD.LO end, k, ldx, track0, xmad1;
-
-// writeS = (tid32 + tid4*128) * 4 + (4096 if B)
---:-:-:-:1      ISCADD writeS, tid4,   tid32, 0x7;
---:-:-:-:1      SHL    writeS, writeS, 0x2;
---:-:-:-:1  @P0 IADD   writeS, writeS, 4x<1024>;
 
 // readAs and readBs are carefully constructed to avoid any bank conflicts while loading from shared
 // readAs = (((tid >> 1) & 7) | ((tid >> 7) << 4)) << 4;
@@ -118,47 +160,72 @@
 --:-:-:-:1      ISCADD   readBs, readBs, 4x<1024>, 0x4;
 
 // Preload the first 8 lines from texture memory
+// Break this up into two barriers so we can load 4 at a time (works faster in main loop so do here as well).
+// Keep these instructions in this order (but allow others to interleave).
+// Normally the scheduler tries to preserve source order by default, but in this case
+// the IADDs to the track variables in linear mode can make a later instruction ready before a preceeding one.
+<ORDERED>
 --:-:-:-:1      TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;
 --:-:-:-:1      TLD.B.LZ.T loadX1, track1, tex, 0x0, 1D, 0x1;
 --:-:-:-:1      TLD.B.LZ.T loadX2, track2, tex, 0x0, 1D, 0x1;
---:-:-:-:1      TLD.B.LZ.T loadX3, track3, tex, 0x0, 1D, 0x1;
+--:-:1:-:1      TLD.B.LZ.P loadX3, track3, tex, 0x0, 1D, 0x1; // Set Dep 1
 --:-:-:-:1      TLD.B.LZ.T loadX4, track4, tex, 0x0, 1D, 0x1;
 --:-:-:-:1      TLD.B.LZ.T loadX5, track5, tex, 0x0, 1D, 0x1;
 --:-:-:-:1      TLD.B.LZ.T loadX6, track6, tex, 0x0, 1D, 0x1;
---:-:2:Y:2      TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1;  // Set Dep 2, Stall 1
-
-// Note the final extra stall here.  The next instruction is using the barrier right away
-// and it takes one extra clock for it to set.  Also note that the scheduler doesn't set
-// a stall amount for the last instruction.  Though be careful here as the scheduler may reorder
-// this instruction earlier.  In this case it doesn't so it's ok.
+--:-:2:-:1      TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1; // Set Dep 2
+</ORDERED>
 
 </SCHEDULE_BLOCK>
 
+// These instuctions need to occur after the textures load so put them in a new block
+// that starts with a dependency barrier wait.
+<SCHEDULE_BLOCK>
+
+<CODE>
+    our $mode;
+
+    if ($mode eq 'linear')
+    {
+        return q|
+            01:-:-:-:1      STS [writeS + 4x<0*128>], loadX0; // Wait Dep 1
+            --:-:-:-:1      STS [writeS + 4x<1*128>], loadX1;
+            --:-:-:-:1      STS [writeS + 4x<2*128>], loadX2;
+            --:-:-:-:1      STS [writeS + 4x<3*128>], loadX3;
+            02:-:-:-:1      STS [writeS + 4x<4*128>], loadX4; // Wait Dep 2
+            --:-:-:-:1      STS [writeS + 4x<5*128>], loadX5;
+            --:-:-:-:1      STS [writeS + 4x<6*128>], loadX6;
+            --:-:-:-:1      STS [writeS + 4x<7*128>], loadX7;
+        |;
+    }
+    else
+    {
+        return q|
+            01:-:-:-:1      STS [writeS + 4x<000 + 00>], loadX0; // Wait Dep 1
+            --:-:-:-:1      STS [writeS + 4x<000 + 32>], loadX1;
+            --:-:-:-:1      STS [writeS + 4x<000 + 64>], loadX2;
+            --:-:-:-:1      STS [writeS + 4x<000 + 96>], loadX3;
+            02:-:-:-:1      STS [writeS + 4x<512 + 00>], loadX4; // Wait Dep 2
+            --:-:-:-:1      STS [writeS + 4x<512 + 32>], loadX5;
+            --:-:-:-:1      STS [writeS + 4x<512 + 64>], loadX6;
+            --:-:-:-:1      STS [writeS + 4x<512 + 96>], loadX7;
+        |;
+    }
+</CODE>
+
 // Increment tracks after the loads are complete to avoid needing write-after-read dependencies
-02:-:-:-:1      STS [writeS + 4x<000 + 00>], loadX0; // Wait Dep 2
---:-:-:-:0      IADD track0, track0, ldx8;           // Dual Issue
---:-:-:-:1      STS [writeS + 4x<000 + 32>], loadX1;
---:-:-:-:0      IADD track1, track1, ldx8;
---:-:-:-:1      STS [writeS + 4x<000 + 64>], loadX2;
---:-:-:-:0      IADD track2, track2, ldx8;
---:-:-:-:1      STS [writeS + 4x<000 + 96>], loadX3;
---:-:-:-:0      IADD track3, track3, ldx8;
---:-:-:-:1      STS [writeS + 4x<512 + 00>], loadX4;
---:-:-:-:0      IADD track4, track4, ldx8;
---:-:-:-:1      STS [writeS + 4x<512 + 32>], loadX5;
---:-:-:-:0      IADD track5, track5, ldx8;
---:-:-:-:1      STS [writeS + 4x<512 + 64>], loadX6;
---:-:-:-:0      IADD track6, track6, ldx8;
---:-:-:-:1      STS [writeS + 4x<512 + 96>], loadX7;
---:-:-:-:0      IADD track7, track7, ldx8;
+--:-:-:-:1      IADD track0, track0, ldx8;
+--:-:-:-:1      IADD track1, track1, ldx8;
+--:-:-:-:1      IADD track2, track2, ldx8;
+--:-:-:-:1      IADD track3, track3, ldx8;
+--:-:-:-:1      IADD track4, track4, ldx8;
+--:-:-:-:1      IADD track5, track5, ldx8;
+--:-:-:-:1      IADD track6, track6, ldx8;
+--:-:-:-:1      IADD track7, track7, ldx8;
 
 // Wait for all threads to finish loading shared
 --:-:-:-:5      BAR.SYNC 0x0;
 
-// Next write to shared goes to high area.
-// Having 2 share buffers allows us to eliminate a bar.sync in the main loop
-// Must go after BAR.SYNC to avoid needing WaR dep
---:-:-:-:1      LOP.XOR writeS, writeS, 4x<2048>;
+</SCHEDULE_BLOCK>
 
 // Preload the fist lines of A and B from shared
 // Initialize C registeres to zero
@@ -182,35 +249,29 @@
         x01y18 x03y18 x01y19 x03y19 x00y18 x02y18 x00y19 x02y19
     );
 
-    # You can experiment with a more naive ordering here and see performance drops 40 Gflops
-    # my $c = 0;
-    # foreach my $y ('00'..'03', 16..19)
-    # {
-    #   foreach my $x ('00'..'03', 32..35)
-    #   {
-    #       $cOrder[$c++] = "x${x}y$y";
-    #   }
-    # }
-
     my %insert =
     (
-        0  => '--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<0*128 + 00>];',
-        2  => '--:-:-:-:1      LDS.U.128 j0By00, [readBs + 4x<0*128 + 00>];',
-        4  => '--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 4x<0*128 + 32>];',
-        6  => '--:-:1:-:1      LDS.U.128 j0By16, [readBs + 4x<0*128 + 16>]; // Set Dep 1',
+        0  => "--:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<0*128 + 00>];\n",
+        2  => "--:-:-:-:1      LDS.U.128 j0By00, [readBs + 4x<0*128 + 00>];\n",
+        4  => "--:-:-:-:1      LDS.U.128 j0Ax32, [readAs + 4x<0*128 + 32>];\n",
+        6  => "--:-:1:-:1      LDS.U.128 j0By16, [readBs + 4x<0*128 + 16>]; // Set Dep 1\n",
     );
 
     my $out;
     foreach my $c (0 .. 63)
     {
         # Interleave the load instructions with the zeroing instructions
-        my ($ins, $stall) = exists $insert{$c} ? ("$insert{$c}\n", 0) : ('', 1);
+        my ($ins, $stall) = exists $insert{$c} ? ($insert{$c}, 0) : ('', 1);
 
         $out .= "--:-:-:-:$stall      MOV c$cOrder[$c], RZ;\n$ins";
     }
     return $out;
 
 </CODE>
+
+// Next store to shared goes to high area.
+// Having 2 share buffers allows us to eliminate a bar.sync in the main loop
+--:-:-:-:1      LOP.XOR writeS, writeS, 4x<2048>;
 
 // The main loop
 // While calculating the first line, load in the next line from shared.
@@ -238,6 +299,7 @@ LOOP:
 
     # Shared global var between CODE sections
     our @cOrder;
+    our $mode;
 
     my %insert =
     (
@@ -254,15 +316,31 @@ LOOP:
         j1c33 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX6, track6, tex, 0x0, 1D, 0x1;\n",
         j1c35 => "--:-:3:-:1  \@P0 TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1; // Set Dep 3\n",
 
-        j5c29 => "02:-:-:-:1  \@P0 STS [writeS + 4x<000 + 00>], loadX0;       // Wait Dep 2\n",
-        j5c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 32>], loadX1;\n",
-        j5c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 64>], loadX2;\n",
-        j5c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 96>], loadX3;\n",
+        ($mode eq 'linear' ?
+            (
 
-        j6c29 => "04:-:-:-:1  \@P0 STS [writeS + 4x<512 + 00>], loadX4;       // Wait Dep 3\n",
-        j6c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 32>], loadX5;\n",
-        j6c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 64>], loadX6;\n",
-        j6c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 96>], loadX7;\n",
+                j5c29 => "02:-:-:-:1  \@P0 STS [writeS + 4x<0*128>], loadX0;       // Wait Dep 2\n",
+                j5c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<1*128>], loadX1;\n",
+                j5c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<2*128>], loadX2;\n",
+                j5c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<3*128>], loadX3;\n",
+
+                j6c29 => "04:-:-:-:1  \@P0 STS [writeS + 4x<4*128>], loadX4;       // Wait Dep 3\n",
+                j6c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<5*128>], loadX5;\n",
+                j6c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<6*128>], loadX6;\n",
+                j6c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<7*128>], loadX7;\n",
+            ) :
+            (
+                j5c29 => "02:-:-:-:1  \@P0 STS [writeS + 4x<000 + 00>], loadX0;       // Wait Dep 2\n",
+                j5c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 32>], loadX1;\n",
+                j5c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 64>], loadX2;\n",
+                j5c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 96>], loadX3;\n",
+
+                j6c29 => "04:-:-:-:1  \@P0 STS [writeS + 4x<512 + 00>], loadX4;       // Wait Dep 3\n",
+                j6c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 32>], loadX5;\n",
+                j6c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 64>], loadX6;\n",
+                j6c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 96>], loadX7;\n",
+            )
+        ),
 
         # We need one barrier in the main loop after writing shared memory.
         # Note, BAR.SYNCs do not sync memory read access automatically, you still need to flag the barriers (writes are sync'd).
@@ -275,23 +353,28 @@ LOOP:
                 "--:-:-:-:1  \@P0 LOP.XOR readBs, readBs, 4x<2048>;\n" .
                 "--:-:-:-:1  \@P0 LOP.XOR writeS, writeS, 4x<2048>;\n",
 
-        # Note having 8 IADDs slightly hits our FFMA performance, but TLD doesn't take an offset.
+        # Note having 8 IADDs slightly hits our FFMA performance (8/520 = 1.5%), but TLD doesn't take an offset.
         # LDG.CI doesn't have this issue, but doesn't give you the nice features of texture loads:
-        #   -Boundry clamping:  simplifies our matrix load logic so we don't need to worry about loading out of bounds
-        #   -Normalized floats: if we don't need full 32 bits of precision we could store our matrices using 16 or 8 bit values
-        j7c47 => "--:-:-:-:1  \@P0 IADD track0, track0, ldx8;\n",
-        j7c49 => "--:-:-:-:1  \@P0 IADD track1, track1, ldx8;\n",
-        j7c51 => "--:-:-:-:1  \@P0 IADD track2, track2, ldx8;\n",
-        j7c53 => "--:-:-:-:1  \@P0 IADD track3, track3, ldx8;\n",
-        j7c55 => "--:-:-:-:1  \@P0 IADD track4, track4, ldx8;\n",
-        j7c57 => "--:-:-:-:1  \@P0 IADD track5, track5, ldx8;\n",
-        j7c59 => "--:-:-:-:1  \@P0 IADD track6, track6, ldx8;\n",
-        j7c61 => "--:-:-:-:1  \@P0 IADD track7, track7, ldx8;\n",
-
-        j7c63 => "--:-:-:Y:5  \@P0 BRA LOOP;\n",
+        #   -Boundry Clamping:  simplifies our matrix load logic so we don't need to worry about loading out of bounds
+        #   -Normalized Floats: if we don't need full 32 bits of precision we could store our matrices using 16 or 8 bit values
+        j7c63 =>
+                "--:-:-:-:1  \@P0 IADD track0, track0, ldx8;\n" .
+                "--:-:-:-:1  \@P0 IADD track1, track1, ldx8;\n" .
+                "--:-:-:-:1  \@P0 IADD track2, track2, ldx8;\n" .
+                "--:-:-:-:1  \@P0 IADD track3, track3, ldx8;\n" .
+                "--:-:-:-:1  \@P0 IADD track4, track4, ldx8;\n" .
+                "--:-:-:-:1  \@P0 IADD track5, track5, ldx8;\n" .
+                "--:-:-:-:1  \@P0 IADD track6, track6, ldx8;\n" .
+                "--:-:-:-:0  \@P0 IADD track7, track7, ldx8;\n" .
+                "--:-:-:Y:5  \@P0 BRA LOOP;\n",
     );
 
     my $out;
+    # We unroll our main loop 8 iterations
+    # This gives ample time for our textures to load.
+    # We could unroll further but that increases the size of the program and increase instruction fetch latency on the branches.
+    # We'd also need more shared memory to buffer the lines and more registers to store texture loads.
+    # With metaprogramming you could parameterize all this and autotune this implementation for your matrix sizes.
     foreach my $j (0 .. 7)
     {
         my $odd      = $j & 1;
@@ -301,49 +384,57 @@ LOOP:
         # No need to load on last loop iteration
         my $rsPred   = $j == 7 ? '@P0' : '   ';
 
-        # Roll up our LDS ops here to keep them easier to manage and tune
-        $insert{"j${j}c0"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
-        $insert{"j${j}c2"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
-        $insert{"j${j}c4"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dAx32, [readAs + 4x<%d*128 + 32>];\n", $rsPred, $nOdd, $rsOffset;
-        $insert{"j${j}c6"} = sprintf "--:-:1:-:1  %s LDS.U.128 j%dBy16, [readBs + 4x<%d*128 + 16>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
-
         # You can experiment here with different vector load sizes
-        # LDS.128 runs about 40 Gflops faster than LDS.64 (GM107).  Not a huge difference since our latencies are so well hidden.
-        # I think LDS.128 is implemented internally as a pair of LDS.64 ops which could be another reason for the comparable performance.
-        # I think the big benefit with 128 is being able to issue all our LDS ops earlier, allowing more FFMA's prior to reading out the results.
-        #$insert{"j${j}c0"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c2"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx02, [readAs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c4"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c6"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy02, [readBs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c8"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx32, [readAs + 4x<%d*128 + 32>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c10"} = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx34, [readAs + 4x<%d*128 + 34>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c12"} = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy16, [readBs + 4x<%d*128 + 16>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c14"} = sprintf "--:-:1:-:1  %s LDS.U.64 j%dBy18, [readBs + 4x<%d*128 + 18>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
+        my $vec = 128;
 
-        # This one drops performance by about 200 Gflops.  So you want to at least use LDS.64 if you can.
-        #$insert{"j${j}c0"}  = sprintf "--:-:-:-:1  %s LDS j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c1"}  = sprintf "--:-:-:-:1  %s LDS j%dAx01, [readAs + 4x<%d*128 + 01>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c2"}  = sprintf "--:-:-:-:1  %s LDS j%dAx02, [readAs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c3"}  = sprintf "--:-:-:-:1  %s LDS j%dAx03, [readAs + 4x<%d*128 + 03>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c4"}  = sprintf "--:-:-:-:1  %s LDS j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c5"}  = sprintf "--:-:-:-:1  %s LDS j%dBy01, [readBs + 4x<%d*128 + 01>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c6"}  = sprintf "--:-:-:-:1  %s LDS j%dBy02, [readBs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c7"}  = sprintf "--:-:-:-:1  %s LDS j%dBy03, [readBs + 4x<%d*128 + 03>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c8"}  = sprintf "--:-:-:-:1  %s LDS j%dAx32, [readAs + 4x<%d*128 + 32>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c9"}  = sprintf "--:-:-:-:1  %s LDS j%dAx33, [readAs + 4x<%d*128 + 33>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c10"} = sprintf "--:-:-:-:1  %s LDS j%dAx34, [readAs + 4x<%d*128 + 34>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c11"} = sprintf "--:-:-:-:1  %s LDS j%dAx35, [readAs + 4x<%d*128 + 35>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c12"} = sprintf "--:-:-:-:1  %s LDS j%dBy16, [readBs + 4x<%d*128 + 16>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c13"} = sprintf "--:-:-:-:1  %s LDS j%dBy17, [readBs + 4x<%d*128 + 17>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c14"} = sprintf "--:-:1:-:1  %s LDS j%dBy18, [readBs + 4x<%d*128 + 18>];\n", $rsPred, $nOdd, $rsOffset;
-        #$insert{"j${j}c15"} = sprintf "--:-:1:-:1  %s LDS j%dBy19, [readBs + 4x<%d*128 + 19>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
-
+        if ($vec == 128)
+        {
+            # Roll up our LDS ops here to keep them easier to manage and tune
+            $insert{"j${j}c0"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c2"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c4"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dAx32, [readAs + 4x<%d*128 + 32>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c6"} = sprintf "--:-:1:-:1  %s LDS.U.128 j%dBy16, [readBs + 4x<%d*128 + 16>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
+        }
+        elsif ($vec == 64)
+        {
+            # LDS.128 runs about 40 Gflops faster than LDS.64 (GM107).  Not a huge difference since our latencies are so well hidden.
+            # I think LDS.128 is implemented internally as a pair of LDS.64 ops which could be another reason for the comparable performance.
+            # I think the big benefit with 128 is being able to issue all our LDS ops earlier, allowing more FFMA's prior to reading out the results.
+            $insert{"j${j}c0"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c2"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx02, [readAs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c4"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c6"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy02, [readBs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c8"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx32, [readAs + 4x<%d*128 + 32>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c10"} = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx34, [readAs + 4x<%d*128 + 34>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c12"} = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy16, [readBs + 4x<%d*128 + 16>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c14"} = sprintf "--:-:1:-:1  %s LDS.U.64 j%dBy18, [readBs + 4x<%d*128 + 18>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
+        }
+        else
+        {
+            # This one drops performance by about 200 Gflops.  So you want to at least use LDS.64 if you can.
+            $insert{"j${j}c0"}  = sprintf "--:-:-:-:1  %s LDS j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c1"}  = sprintf "--:-:-:-:1  %s LDS j%dAx01, [readAs + 4x<%d*128 + 01>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c2"}  = sprintf "--:-:-:-:1  %s LDS j%dAx02, [readAs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c3"}  = sprintf "--:-:-:-:1  %s LDS j%dAx03, [readAs + 4x<%d*128 + 03>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c4"}  = sprintf "--:-:-:-:1  %s LDS j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c5"}  = sprintf "--:-:-:-:1  %s LDS j%dBy01, [readBs + 4x<%d*128 + 01>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c6"}  = sprintf "--:-:-:-:1  %s LDS j%dBy02, [readBs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c7"}  = sprintf "--:-:-:-:1  %s LDS j%dBy03, [readBs + 4x<%d*128 + 03>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c8"}  = sprintf "--:-:-:-:1  %s LDS j%dAx32, [readAs + 4x<%d*128 + 32>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c9"}  = sprintf "--:-:-:-:1  %s LDS j%dAx33, [readAs + 4x<%d*128 + 33>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c10"} = sprintf "--:-:-:-:1  %s LDS j%dAx34, [readAs + 4x<%d*128 + 34>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c11"} = sprintf "--:-:-:-:1  %s LDS j%dAx35, [readAs + 4x<%d*128 + 35>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c12"} = sprintf "--:-:-:-:1  %s LDS j%dBy16, [readBs + 4x<%d*128 + 16>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c13"} = sprintf "--:-:-:-:1  %s LDS j%dBy17, [readBs + 4x<%d*128 + 17>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c14"} = sprintf "--:-:1:-:1  %s LDS j%dBy18, [readBs + 4x<%d*128 + 18>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c15"} = sprintf "--:-:1:-:1  %s LDS j%dBy19, [readBs + 4x<%d*128 + 19>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
+        }
         foreach my $c (0 .. 63)
         {
-            my ($x, $y) = $cOrder[$c] =~ /^(x\d+)(y\d+)/;
+            my ($x,$y) = $cOrder[$c] =~ /^(x\d+)(y\d+)/;
 
             # Grab an instruction for insertion if one exists for this j and c combination
-            my $ins = $insert{"j${j}c$c"} || '';
+            my $ins    = $insert{"j${j}c$c"} || '';
 
             # Scatter some yields in there to better balance the workload and reduce sync stalls
             # Don't pair a yeild with the dual issued ffmas as that kills performance for some reason
@@ -450,9 +541,7 @@ LOOP:
 
 </SCHEDULE_BLOCK>
 
-
-
-# Note CODE sections can appear inside of scheduled blocks, I just don't choose to in this example.
+// No need to schedule this section
 <CODE>
 
     my $out;
@@ -485,7 +574,7 @@ LOOP:
 --:-:-:-:1      MOV cs4, cx32y%02d;
 --:-:-:-:1      MOV cs5, cx33y%02d;
 --:-:-:-:1      MOV cs6, cx34y%02d;
---:-:-:-:1      MOV cs7, cx35y%02d;
+--:-:-:-:0      MOV cs7, cx35y%02d; // Dual Issue
 --:-:-:-:5      CAL STORE_C;
 |, $wait, $y, $comment, ($y) x 7;
 
@@ -494,6 +583,7 @@ LOOP:
 
 </CODE>
 
+// And we'd done.  The remainder is the STORE_C method that's defined at the end of the kernel.
 --:-:-:-:5      EXIT;
 
 // This routine does warp synchronous shuffling of our output data so as to be able
