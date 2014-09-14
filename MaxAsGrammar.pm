@@ -19,12 +19,16 @@ sub getI
     # parse out our custom index immediates for addresses
     if ($val  =~ m'^(\d+)[xX]<([^>]+)>')
     {
+        # allow any perl expression and multiple result by leading decimal.
         $val = $1 * eval $2;
     }
-    else
+    # hexidecial value
+    elsif ($val  =~ m'^0x[0-9a-zA-Z]+')
     {
         $val = hex($val);
     }
+    # otherwise val is a simple decimal value that doesn't need to be modified
+
     if ( $neg )
     {
         # if the mask removes the sign bit the "neg" flag adds it back on the code somewhere else
@@ -122,7 +126,8 @@ my %operands =
 
 # Rules for operands and their closely tied flags
 my $hex     = qr"0[xX][0-9a-fA-F]+";
-my $iAddr   = qr"-?\d+[xX]<[^>]+>";
+my $iAddr   = qr"\d+[xX]<[^>]+>";
+my $immed   = qr"$hex|$iAddr|\d+"o;
 my $reg     = qr"[a-zA-Z_]\w*"; # must start with letter or underscore\
 my $p       = qr"P[0-6T]";
 my $noPred  = qr"(?<noPred>)";
@@ -146,20 +151,20 @@ my $c20s39  = qr"(?<r39neg>\-)?c\[(?<c34>$hex)\]\s*\[(?<c39>$hex)\]"o;
 my $f20w32  = qr"(?<f20w32>(?:\-|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))";
 my $f20     = qr"(?<f20>(?:(?<neg>\-)|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))(?<r20neg>\.NEG)?";
 my $d20     = qr"(?<d20>(?:(?<neg>\-)|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))(?<r20neg>\.NEG)?";
-my $i8w4    = qr"(?<i8w4>$hex)"o;
-my $i20     = qr"(?<i20>(?<neg>\-)?$hex|$iAddr)(?<r20neg>\.NEG)?"o;
-my $i20w8   = qr"(?<i20w8>$hex)"o;
-my $i20w12  = qr"(?<i20w12>$hex)"o;
-my $i20w24  = qr"(?<i20w24>\-?$hex|$iAddr)"o;
-my $i20w32  = qr"(?<i20w32>\-?$hex|$iAddr)"o;
-my $i39w8   = qr"(?<i39w8>\-?$hex)"o;
-my $i28w8   = qr"(?<i28w8>$hex)"o;
-my $i28w20  = qr"(?<i28w20>\-?$hex|$iAddr)"o;
-my $i34w13  = qr"(?<i34w13>$hex|$iAddr)"o;
-my $i36w20  = qr"(?<i36w20>$hex|$iAddr)"o;
-my $i48w8   = qr"(?<i48w8>$hex)"o;
-my $i51w5   = qr"(?<i51w5>$hex)"o;
-my $i53w5   = qr"(?<i53w5>$hex)"o;
+my $i8w4    = qr"(?<i8w4>$immed)"o;
+my $i20     = qr"(?<i20>(?<neg>\-)?$immed)(?<r20neg>\.NEG)?"o;
+my $i20w8   = qr"(?<i20w8>$immed)"o;
+my $i20w12  = qr"(?<i20w12>$immed)"o;
+my $i20w24  = qr"(?<i20w24>\-?$immed)"o;
+my $i20w32  = qr"(?<i20w32>\-?$immed)"o;
+my $i39w8   = qr"(?<i39w8>\-?$immed)"o;
+my $i28w8   = qr"(?<i28w8>$immed)"o;
+my $i28w20  = qr"(?<i28w20>\-?$immed)"o;
+my $i34w13  = qr"(?<i34w13>$immed)"o;
+my $i36w20  = qr"(?<i36w20>$immed)"o;
+my $i48w8   = qr"(?<i48w8>$immed)"o;
+my $i51w5   = qr"(?<i51w5>$immed)"o;
+my $i53w5   = qr"(?<i53w5>$immed)"o;
 my $ir20    = qr"$i20|$r20"o;
 my $cr20    = qr"$c20|$r20"o;
 my $icr20   = qr"$i20|$c20|$r20"o;
@@ -210,6 +215,8 @@ my $memCache = qr"(?<E>\.E)?(?<U>\.U)?(?:\.(?<cache>CG|CI|CS|CV|IL|WT))?";
 # dual : whether this instruction type can be dual issued
 # reuse: whether this instruction type accepts register reuse flags.
 
+# Some of these values are guesses and need to be updated from micro benchmarks.
+# We may need to split these classes up further.
 my $s2rT  = {class => 's2r',   lat => 2,   blat => 25,  rlat => 0, rhold => 0,  tput => 1,   dual => 0, reuse => 0};
 my $smemT = {class => 'mem',   lat => 2,   blat => 50,  rlat => 2, rhold => 20, tput => 1,   dual => 1, reuse => 0};
 my $gmemT = {class => 'mem',   lat => 2,   blat => 200, rlat => 4, rhold => 20, tput => 1,   dual => 1, reuse => 0};

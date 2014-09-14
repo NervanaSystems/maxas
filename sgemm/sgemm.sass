@@ -59,7 +59,8 @@
 <SCHEDULE_BLOCK>
 
 // First 128 threads load A to shared, 2nd 128 loads B to shared
-// Note this technique is not possible in cuda or ptx as there's no way to specify a warp-uniform predicate for a memory op
+// Note this technique is not possible in cuda or ptx as there's no way to specify a warp-uniform predicate for a memory op.
+// Compile sgemm.cu and inspect the sass to see what I'm talking about.
 
 // blk = tid >= 128 ? by   : bx;
 // ldx = tid >= 128 ? ldb  : lda;
@@ -78,7 +79,7 @@
 
 // tid32  = tid & 31
 // tid4   = (tid >> 5) & 3
---:-:-:-:1      LOP.AND tid32,  tid, 0x1f;
+--:-:-:-:1      LOP.AND tid32,  tid, 31;
 --:-:-:-:1      BFE.U32 tid4,   tid, 0x205;
 
 <CODE>

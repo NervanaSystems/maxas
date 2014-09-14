@@ -757,7 +757,7 @@ sub Scheduler
                 $stall = $ready->{tput} if $stall < $ready->{tput};
             }
             # dual issue with a simple instruction (tput == 1)
-            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} == 1 && $stall == 1)
+            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} == 1 && $stall == 1 && $ready->{exeTime} <= $clock)
             {
                 $stall = 0;
             }
@@ -815,13 +815,13 @@ sub getRegisterMap
         }
         foreach (split '\s*,\s*', $regNames)
         {
-            if (m'^(\w+)<((?:\d+\s*\-\s*\d+\s*\|?\s*)+)>(\w*)$')
+            if (m'^(\w+)<((?:\d+(?:\s*\-\s*\d+)?\s*\|?\s*)+)>(\w*)$')
             {
                 my ($name1, $name2) = ($1, $3);
                 foreach (split '\s*\|\s*', $2)
                 {
                     my ($start, $stop) = split '\s*\-\s*';
-                    push @nameList, "$name1$_$name2" foreach ($start .. $stop);
+                    push @nameList, "$name1$_$name2" foreach ($start .. $stop||$start);
                 }
             }
             elsif (m'^\w+$')

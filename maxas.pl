@@ -6,6 +6,8 @@ use Data::Dumper;
 
 require 5.10.0;
 
+$Data::Dumper::Sortkeys = 1;
+
 my $mode = shift;
 
 # List cubin contents

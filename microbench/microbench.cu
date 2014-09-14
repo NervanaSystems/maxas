@@ -11,7 +11,7 @@
 // Use extern C so C++ doesn't mangle our kernel name
 extern "C" __global__ void  microbench(int *out, int *clocks, int *in)
 {
-	__shared__ int share[1024];
+	__shared__ int share[4096];
 
 	int tid = threadIdx.x;
 	int blkdim = blockDim.x;

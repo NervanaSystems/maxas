@@ -1,10 +1,6 @@
 
-// Note this file isn't configured to automatically compile
-
-#include <device_functions.h>
-#include <device_launch_parameters.h>
-#include <cuda_texture_types.h>
-#include <texture_fetch_functions.h>
+// Note this file isn't configured to automatically compile.
+// Here's how:
 
 // If you want to look at the ptx first:
 // nvcc -arch sm_50 -m 32 -ptx sgemm.cu
@@ -14,12 +10,17 @@
 // nvcc -arch sm_50 -m 32 -cubin sgemm.cu
 
 // If tweaking a kernel or writing a new one based on this shell code you would then do this:
-// maxas.pl -e sgemm.cubin sgemm.sass
+// maxas.pl -e kernel.cubin kernel.sass
 
-// I've already included a modified kernel so the next step is..
+// I've already included a modified kernel (sgemm.sass) so the next step is..
 
 // Splice the manually assembled code back into the cubin:
 // maxas.pl -i sgemm.sass sgemm.cubin
+
+#include <device_functions.h>
+#include <device_launch_parameters.h>
+#include <cuda_texture_types.h>
+#include <texture_fetch_functions.h>
 
 typedef texture<float, cudaTextureType1D, cudaReadModeElementType> floatTex;
 

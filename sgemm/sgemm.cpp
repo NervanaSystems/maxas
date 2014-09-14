@@ -103,8 +103,8 @@ int main(int argc, char* argv[])
 	srand((unsigned int)time(0));
 	for(int i = 0; i < N * N; i++) //
 	{
-		A[i] = 1.0f;//(float)rand() / (float)RAND_MAX;
-		B[i] = 1.0f;//(float)rand() / (float)RAND_MAX;
+		A[i] = (float)rand() / (float)RAND_MAX;
+		B[i] = (float)rand() / (float)RAND_MAX;
 		//A[i] = 1.0f;
 		//B[i * N + counter++] = 1.0f; // identity matrix
 	}
@@ -296,15 +296,15 @@ void test(float* C, float* T, int N, size_t size)
 						if (c != t)
 						{
 							errors++;
-							//fprintf(file, "%.0f!%.0f\t", c , t);
+							fprintf(file, "%.0f!%.0f\t", c , t);
 							//fprintf(file, "%.0f!", c);
-							fprintf(file, "!");
+							//fprintf(file, "!");
 						}
 						else
 						{
-							//fprintf(file, "%.0f=%.0f\t", c , t);
+							fprintf(file, "%.0f=%.0f\t", c , t);
 							//fprintf(file, "%.0f=", c);
-							fprintf(file, "=");
+							//fprintf(file, "=");
 						}
 					}
 					fprintf(file, "\n");

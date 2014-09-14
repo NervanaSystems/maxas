@@ -162,7 +162,7 @@ int main(int argc, char* argv[])
 			{
 				// Sometimes we want data on each thread, sometimes just one sample per warp is fine
 				for (int lane = 0; lane < lanes; lane++)
-					printf("b:%02d w:%03d t:%04d l:%02d clocks:%04u out:0x%08x\n", blk, tid/32, tid, lane, clocks_p[tid+lane], dataOut_p[tid+lane]); //
+					printf("b:%02d w:%03d t:%04d l:%02d clocks:%04u out:%4d\n", blk, tid/32, tid, lane, clocks_p[tid+lane], dataOut_p[tid+lane]); //
 
 				count++;
 				total += clocks_p[tid];
