@@ -28,16 +28,16 @@
     33,32,41,40,49,48,57,56 : cx66y<00-03|64-67>
     37,36,45,44,53,52,61,60 : cx67y<00-03|64-67>
 
-    0-63    : cz<00-63>
-
     // Double buffered register blocking
     // Any bank conflicts that we can't avoid in these registers we can hide with .reuse flags
     64-79   : j0Ax<00-03|64-67>, j0By<00-03|64-67>
     80-95   : j1Ax<00-03|64-67>, j1By<00-03|64-67>
 
     // The offset we store our zero value for initializing C
-    // Reuse a register from the second block
+    // Reuse a register from the second blocking registers
     80      : zOffset
+    // Aliases for the C registers we use for initializing C
+    0-63    : cz<00-63>
 
     // Registers to load A or B
     96-103  : loadX<0-7>
