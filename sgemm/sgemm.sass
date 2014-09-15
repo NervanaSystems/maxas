@@ -17,7 +17,7 @@
 
 <REGISTER_MAPPING>
 
-    // 64 maxtrix C output registers.
+    // 64 C maxtrix output registers.
     // Use special mapping to avoid register bank conflicts between these registers and the blocking registers.
      3, 2,11,10,19,18,27,26 : cx00y<00-03|64-67>
      7, 6,15,14,23,22,31,30 : cx01y<00-03|64-67>
@@ -89,7 +89,7 @@
 // tid31  = tid & 31
 // tid96  = tid & 96
 // tid128 = tid & 128
---:-:-:-:1      BFE.U32 tid4,   tid, 0x205;
+--:-:-:-:1      BFE.U32 tid4,   tid, 0x205; // 2 bits at position 5
 --:-:-:-:1      LOP.AND tid31,  tid, 31;
 --:-:-:-:1      LOP.AND tid96,  tid, 96;
 --:-:-:-:1      LOP.AND tid128, tid, 128;
@@ -126,7 +126,7 @@
 
 // readAs and readBs are carefully constructed to avoid any bank conflicts while loading from shared
 // readAs = ((tid128 >> 4) | ((tid >> 1) & 7)) << 4;
---:-:-:-:1      BFE.U32 tid7,   tid,    0x301;
+--:-:-:-:1      BFE.U32 tid7,   tid,    0x301; // 3 bits at position 1
 --:-:-:-:1      SHR.U32 readAs, tid128, 4;
 --:-:-:-:1      LOP.OR  readAs, readAs, tid7;
 --:-:-:-:1      SHL     readAs, readAs, 4;
@@ -389,14 +389,13 @@ LOOP:
 --:-:-:-:1      MOV m,   c[0x0][0x144];
 --:-:-:-:1      MOV n,   c[0x0][0x148];
 
-// Remap readAs and readBs onto writeCs so we can shuffle the output for coalesced global writes.
-// readAs stays constant, readBs colapses down from stride 4 to 1
-
 // Remove the high bits if present from the last loop's xor
 --:-:-:-:1      LOP.AND readAs, readAs, 0xfff;
 --:-:-:-:1      LOP.AND readBs, readBs, 0xfff;
 
-//writeCs = (readBs / 4) * 128 + readAs;
+// Remap readAs and readBs onto writeCs so we can shuffle the output for coalesced global writes.
+// readAs stays constant, readBs colapses down from stride 4 to 1
+// writeCs = (readBs / 4) * 128 + readAs;
 --:-:-:-:1      ISCADD  writeCs, readBs, readAs, 5;
 
 // Read out the C values from shared in a simple tid mapped pattern but
@@ -406,7 +405,7 @@ LOOP:
 --:-:-:-:1      SHR.U32  cx, tid128, 2;
 --:-:-:-:1      LOP.OR   cx, tid31,  cx;
 
-//readCs = ((tid96 << 4) | cx) << 2;
+// readCs = ((tid96 << 4) | cx) << 2;
 --:-:-:-:1      SHL      readCs, tid96,  4;
 --:-:-:-:1      LOP.OR   readCs, readCs, cx;
 --:-:-:-:1      SHL      readCs, readCs, 2;
@@ -515,16 +514,20 @@ LOOP:
 --:-:-:-:5      EXIT;
 
 // This routine does warp synchronous shuffling of our output data so as to be able
-// to have coalesced writes to global memory.  This is actually faster because a
-// round trip to shared takes much less time than an extra store to global.
-// The SHFL instruction doesn't help us here because we're swaping different registers
+// to have coalesced writes to global memory.  This is actually faster because the shared
+// memory latencies can be hidden by other warps and we're only adding a few extra clocks
+// to this thread.  Global memory here is the bottleneck and being able to half the needed
+// bandwidth at the expense of a few clocks is a modest win.  This also keeps power lower
+// and our chip running faster.
+
+// Note, the SHFL instruction doesn't help us here because we're swaping different registers
 // from different threads.
 STORE_C:
 
 <SCHEDULE_BLOCK>
 
 // Each warp writes to its own region of memory so we don't need to bar.sync the access.
-// There are some bank conflicts here but no way to avoid them, and the hit just means a few extra clocks.
+// There are some bank conflicts here on the STS.128s but no way to avoid them, and the hit just means a few extra clocks.
 // Note here that the scheduler is able to handle the dependencies between vector and non-vector instructions.
 // It knows from the instruction type and the register map that cs0 here includes cs1, cs2 and cs3 as well.
 --:-:-:-:1      STS.128 [writeCs+4x<00>], cs0;

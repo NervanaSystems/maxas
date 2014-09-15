@@ -92,9 +92,9 @@
 // Normally the scheduler tries to preserve source order by default, but this demonstrates how you enforce
 // an ordering if you need to.
 01:-:-:Y:1      ISETP.GE.AND P0, PT, tid, 128, PT; // Wait Dep 1
---:-:-:-:1      BFE.U32 tid4, tid, 0x205;
+--:-:-:-:1      BFE.U32 tid4, tid, 0x205; // 2 bits at position 5
 --:-:-:-:1      LOP.AND tid31, tid, 31;
---:-:-:-:1      BFE.U32 tid7, tid, 0x301;
+--:-:-:-:1      BFE.U32 tid7, tid, 0x301; // 3 bits at position 1
 --:-:-:-:1      MOV k, c[0x0][0x14c];
 --:-:-:-:1      LOP.AND tid128, tid, 128;
 --:-:-:-:1      LOP.AND readBs, tid, 0x70;
@@ -950,9 +950,13 @@ LOOP:
 --:-:-:-:5      EXIT;
 
 // This routine does warp synchronous shuffling of our output data so as to be able
-// to have coalesced writes to global memory.  This is actually faster because a
-// round trip to shared takes much less time than an extra store to global.
-// The SHFL instruction doesn't help us here because we're swaping different registers
+// to have coalesced writes to global memory.  This is actually faster because the shared
+// memory latencies can be hidden by other warps and we're only adding a few extra clocks
+// to this thread.  Global memory here is the bottleneck and being able to half the needed
+// bandwidth at the expense of a few clocks is a modest win.  This also keeps power lower
+// and our chip running faster.
+
+// Note, the SHFL instruction doesn't help us here because we're swaping different registers
 // from different threads.
 STORE_C:
 // Each warp writes to its own region of memory so we don't need to bar.sync the access.
