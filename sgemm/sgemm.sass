@@ -304,8 +304,8 @@ LOOP:
     foreach my $j (0 .. 7)
     {
         my $odd      = $j & 1;
-        my $nOdd     = $odd ? 0 : 1;
-        # Our rolling blocking registers stay one load ahead off the FFMA's
+        my $nOdd     = !$odd + 0;
+        # Our rolling blocking registers stay one load ahead off the FFMA's (rs: read share)
         my $rsOffset = ($j + 1) % 8;
         # No need to load on last loop iteration
         my $rsPred   = $j == 7 ? '@P0' : '   ';

@@ -63,7 +63,7 @@ __global__ void __launch_bounds__(256) sgemm_kernel_128(
 // If compiling on command line just add -keep -v options to nvcc.
 // Rebuild your solution and look in the log for these lines that follow the ptxas step:
 
-// #$ fatbinary --create="Release/kernel.fatbin" -32 --key="a7bce87544c2a492" --ident="C:/Users/Scott/Documents/Visual Studio 2010/Projects/sgemm6/sgemm6/kernel.cu" --cmdline="-v --opt-level 4 --generate-line-info " "--image=profile=sm_50,file=Release/kernel.sm_50.cubin" "--image=profile=compute_50,file=Release/kernel.ptx" --embedded-fatbin="Release/kernel.fatbin.c" --cuda
+// #$ fatbinary --create="Release/kernel.fatbin" -32 --key="a7bce87544c2a492" --ident="C:/Users/Scott/Documents/sgemm6/sgemm6/kernel.cu" --cmdline="-v --opt-level 4 --generate-line-info " "--image=profile=sm_50,file=Release/kernel.sm_50.cubin" "--image=profile=compute_50,file=Release/kernel.ptx" --embedded-fatbin="Release/kernel.fatbin.c" --cuda
 // #$ cl.exe @Release/kernel.cu.cpp.ii.res > "Release/kernel.cu.cpp.ii" 
 // #$ cl.exe @Release/kernel.cu.obj.res -Fo"Release/kernel.cu.obj" 
 
