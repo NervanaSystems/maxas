@@ -1,6 +1,6 @@
 # Kernel: sgemm_kernel_128
-# InsCnt: 814
-# RegCnt: 122
+# InsCnt: 813
+# RegCnt: 124
 # SharedSize: 16384
 # BarCnt: 1
 # Params(8):
@@ -17,26 +17,27 @@
 # Instructions:
 
 --:-:1:-:1      S2R R118, SR_TID.X;
---:-:2:-:1      S2R R120, SR_CTAID.X;
---:-:3:-:1      S2R R121, SR_CTAID.Y;
+--:-:2:-:1      S2R R122, SR_CTAID.X;
+--:-:3:-:1      S2R R123, SR_CTAID.Y;
 01:-:-:Y:1      ISETP.GE.AND P0, PT, R118.reuse, 0x80, PT;
---:-:-:-:1      LOP.AND R119, R118.reuse, 0x1f;
 --:-:-:-:1      BFE.U32 R6, R118.reuse, 0x205;
---:-:-:-:1      MOV R4, c[0x0][0x14c];
+--:-:-:-:1      LOP.AND R119, R118.reuse, 0x1f;
 --:-:-:-:1      BFE.U32 R7, R118.reuse, 0x301;
---:-:-:-:1      LOP.AND R116, R118.reuse, 0x80;
+--:-:-:-:1      MOV R4, c[0x0][0x14c];
+--:-:-:-:1      LOP.AND R121, R118.reuse, 0x80;
 --:-:-:-:1      LOP.AND R117, R118.reuse, 0x70;
 --:-:-:-:1      LOP.AND R5, R118.reuse, 0x1;
 --:-:-:-:1      ISCADD R115, R6, R119, 0x7;
+--:-:-:-:1      LOP.AND R80, R118.reuse, -0x20;
 --:-:-:-:1      IADD R4, R4, -0x8;
---:-:-:-:1      LOP.AND R80, R118, -0x20;
---:-:-:-:2      SHR.U32 R116, R116, 0x4;
---:-:-:-:1 @!P0 @!P0 MOV R1, c[0x0][0x150];
+--:-:-:-:1      SHR.U32 R116, R121, 0x4;
+--:-:-:-:1      LOP.AND R120, R118, 0x60;
 --:-:-:-:1      SHR.U32 R117, R117, 0x3;
---:-:-:-:0  @P0 @P0 MOV R1, c[0x0][0x154];
+--:-:-:-:0 @!P0 @!P0 MOV R1, c[0x0][0x150];
 --:-:-:-:1      STS.128 [R80+0x2000], RZ;
-06:-:-:-:1      SEL R0, R121, R120, P0;
+--:-:-:-:1  @P0 @P0 MOV R1, c[0x0][0x154];
 --:-:-:-:1      SHL R115, R115, 0x2;
+06:-:-:-:1      SEL R0, R123, R122, P0;
 --:-:-:-:1 @!P0 @!P0 MOV32I R114, 0x80000001;
 --:-:-:-:1  @P0 @P0 MOV32I R114, 0x80000000;
 --:-:-:-:1      LOP.OR R116, R116, R7;
@@ -84,6 +85,7 @@
 --:-:-:-:0      IADD R110, R110, R112.reuse;
 --:-:-:-:1      STS [R115+0x980], R103;
 --:-:-:-:0      IADD R111, R111, R112;
+--:-:-:-:5      BAR.SYNC 0x0;
 --:-:-:-:1      LDS.U.128 R0, [R80+0x2000];
 --:-:-:-:1      LDS.U.128 R4, [R80+0x2000];
 --:-:-:-:1      LDS.U.128 R8, [R80+0x2000];
@@ -100,12 +102,11 @@
 --:-:-:-:1      LDS.U.128 R52, [R80+0x2000];
 --:-:-:-:1      LDS.U.128 R56, [R80+0x2000];
 --:-:-:-:1      LDS.U.128 R60, [R80+0x2000];
---:-:-:-:5      BAR.SYNC 0x0;
+--:-:-:-:0      LOP.XOR R115, R115, 0x2000;
 --:-:-:-:1      LDS.U.128 R64, [R116];
 --:-:-:-:1      LDS.U.128 R72, [R117];
 --:-:-:-:1      LDS.U.128 R68, [R116+0x100];
 --:-:1:-:1      LDS.U.128 R76, [R117+0x100];
---:-:-:-:1      LOP.XOR R115, R115, 0x2000;
 TARGET1:
 --:-:-:-:1      ISETP.LE.AND P0, PT, R104, R113, PT;
 01:-:-:-:0      FFMA R1, R66.reuse, R72.reuse, R1;
@@ -681,45 +682,43 @@ TARGET1:
 --:-:-:-:1  @P0 @P0 IADD R110, R110, R112.reuse;
 --:-:-:-:0  @P0 @P0 IADD R111, R111, R112;
 --:-:-:Y:5  @P0 @P0 BRA TARGET1;
---:-:-:-:1      LOP.AND R89, R118.reuse, 0x60;
---:-:-:-:1      LOP.AND R90, R118, 0x80;
+--:-:-:-:1      SHR.U32 R89, R121, 0x2;
 --:-:-:-:1      MOV R82, c[0x0][0x158];
+--:-:-:-:1      SHR.U32 R72, R120.reuse, 0x1;
 --:-:-:-:1      MOV R80, c[0x0][0x144];
+--:-:-:-:1      SHL R88, R120, 0x4;
 --:-:-:-:1      LOP.AND R116, R116, 0xfff;
---:-:-:-:1      LOP.AND R117, R117, 0xfff;
---:-:-:-:1      SHR.U32 R72, R89, 0x1;
---:-:-:-:1      MOV R81, c[0x0][0x148];
---:-:-:-:1      SHR.U32 R90, R90, 0x2;
---:-:-:-:1      MOV R64, R3;
+--:-:-:-:1      LOP.OR R89, R119, R89;
 --:-:-:-:1      SHL R83, R82.reuse, 0x2;
---:-:-:-:1      MOV R65, R7;
---:-:-:-:1      ISCADD R72, R121, R72, 0x7;
---:-:-:-:1      MOV R66, R1;
+--:-:-:-:1      LOP.AND R117, R117, 0xfff;
+--:-:-:-:1      ISCADD R72, R123, R72, 0x7;
+--:-:-:-:1      MOV R81, c[0x0][0x148];
 --:-:-:-:1      SHL R84, R82.reuse, 0x4;
---:-:-:-:1      LOP.OR R90, R119, R90;
---:-:-:-:1      SHL R88, R89, 0x4;
---:-:-:-:1      MOV R67, R5;
---:-:-:-:1      SHL R85, R82.reuse, 0x5;
---:-:-:-:1      XMAD.MRG R92, R72, R82.H1, RZ;
+--:-:-:-:1      LOP.OR R88, R88, R89;
+--:-:-:-:1      ISCADD R89, R122, R89, 0x7;
+--:-:-:-:1      MOV R64, R3;
+--:-:-:-:1      SHL R85, R82, 0x5;
+--:-:-:-:1      XMAD.MRG R91, R72.reuse, R82.H1.reuse, RZ;
 --:-:-:-:1      ISCADD R87, R117, R116, 0x5;
---:-:-:-:1      MOV R68, R35;
+--:-:-:-:1      MOV R65, R7;
+--:-:-:-:1      SHL R88, R88, 0x2;
+--:-:-:-:1      XMAD R90, R72.reuse, R82, R89;
+--:-:-:-:1      ISETP.LT.AND P5, PT, R89, R80, PT;
+--:-:-:-:1      IADD R89, R89, 0x40;
 --:-:-:-:1      ISCADD R86, R82, -R84, 0x8;
---:-:-:-:1      LOP.OR R88, R88, R90;
---:-:-:-:1      ISCADD R90, R120, R90, 0x7;
+--:-:-:-:1      MOV R66, R1;
+--:-:-:-:1      MOV R67, R5;
+--:-:-:-:1      XMAD.PSL.CBCC R90, R72.H1, R91.H1, R90;
+--:-:-:-:1      IADD R72, R72, -0x1;
+--:-:-:-:1      ISETP.LT.AND P6, PT, R89, R80, PT;
+--:-:-:-:1      MOV R68, R35;
 --:-:-:-:1      MOV R69, R39;
 --:-:-:-:1      MOV R70, R33;
---:-:-:-:2      MOV R71, R37;
---:-:-:-:1      SHL R88, R88, 0x2;
---:-:-:-:1      XMAD R91, R72.reuse, R82, R90;
---:-:-:-:1      ISETP.LT.AND P5, PT, R90, R80.reuse, PT;
---:-:-:-:4      IADD R90, R90, 0x40;
---:-:-:-:1      XMAD.PSL.CBCC R91, R72.H1, R92.H1, R91;
---:-:-:-:1      IADD R72, R72, -0x1;
---:-:-:-:4      ISETP.LT.AND P6, PT, R90, R80, PT;
---:-:-:-:1      ISCADD R76, R91, c[0x0][0x140], 0x2;
+--:-:-:-:1      ISCADD R76, R90, c[0x0][0x140], 0x2;
 --:-:-:-:1      IADD R73, R72.reuse, 0x4;
 --:-:-:-:1      IADD R74, R72.reuse, 0x8;
---:-:-:-:3      IADD R75, R72, 0xc;
+--:-:-:-:1      IADD R75, R72, 0xc;
+--:-:-:-:2      MOV R71, R37;
 --:-:-:Y:6      IADD R76, R76, -R83;
 --:-:-:-:1      IADD R77, R76.reuse, R84;
 --:-:-:Y:5      IADD R78, R76, R85.reuse;

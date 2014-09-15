@@ -6,9 +6,6 @@ use MaxAsGrammar;
 
 require 5.10.0;
 
-# For debugging the scheduler and parser
-my $DEBUG = 0;
-
 # these ops need to be converted from absolute addresses to relative in the sass output by cuobjdump
 my %relOffset  = map { $_ => 1 } qw(BRA SSY CAL PBK PCNT);
 
@@ -457,7 +454,7 @@ my $ScheduleRe = qr'^\s*<SCHEDULE_BLOCK>(.*?)^\s*</SCHEDULE_BLOCK>\n?'ms;
 
 sub Preprocess
 {
-    my ($file, $doReg) = @_;
+    my ($file, $doReg, $debug) = @_;
 
     # Strip out comments
     $file =~ s|$CommentRe||g;
@@ -479,7 +476,7 @@ sub Preprocess
         # XMAD macros should only appear in SCHEDULE_BLOCKs
         $schedBlocks[$i] = replaceXMADs($schedBlocks[$i]);
 
-        $schedBlocks[$i] = Scheduler($schedBlocks[$i], $i+1, $regMap);
+        $schedBlocks[$i] = Scheduler($schedBlocks[$i], $i+1, $regMap, $debug);
     }
 
     # Replace the results
@@ -514,7 +511,7 @@ my @itypes   = qw(class lat rlat tput dual);
 
 sub Scheduler
 {
-    my ($block, $blockNum, $regMap) = @_;
+    my ($block, $blockNum, $regMap, $debug) = @_;
 
     # Build a reverse lookup of reg numbers to names.
     # Note that this may not be unique, so include multiples in a list
@@ -720,7 +717,7 @@ sub Scheduler
             $instruct->{ctrl} |= 1;
             $clock += 1;
         }
-        print "$clock: $instruct->{inst}\n" if $DEBUG;
+        print "$clock: $instruct->{inst}\n" if $debug;
 
         # add a new instruction to the schedule
         push @schedule, $instruct;
@@ -736,7 +733,7 @@ sub Scheduler
                 my $earliest = $clock + $latency;
                 $child->{exeTime} = $earliest if $child->{exeTime} < $earliest;
 
-                print "\t\t$child->{exeTime},$child->{parents} $child->{inst}\n" if $DEBUG;
+                print "\t\t$child->{exeTime},$child->{parents} $child->{inst}\n" if $debug;
 
                 # decrement parent count and add to ready queue if none remaining.
                 push @ready, $child if --$child->{parents} < 1;
@@ -775,7 +772,7 @@ sub Scheduler
             $a->{lineNum} <=> $b->{lineNum}
             } @ready;
 
-        if ($DEBUG)
+        if ($debug)
         {
             print  "\text,stl,mix,dep,lin, inst\n";
             printf "\t%3s,%3s,%3s,%3s,%3s, %s\n", @{$_}{qw(exeTime stall mix deps lineNum inst)} foreach @ready;

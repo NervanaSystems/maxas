@@ -43,14 +43,14 @@
     96-103  : loadX<0-7>
 
     // Key state registers for main loop and some we reuse for outputing C
-    104-127 : track<0-7>, ldx8, end, tex, writeS, readAs, readBs, tid, tid31, bx, by
+    104-127 : track<0-7>, ldx8, end, tex, writeS, readAs, readBs, tid, tid31, tid96, tid128, bx, by
 
     // Temporary registers to calculate the state registers. Reuse the C output registers.
     0-63    : blk, ldx, ldx2, ldx4, k, tid1, tid4, tid7, xmad<0-1>
 
     // Registers to store the results back to global memory. Reuse any register not needed after the main loop.
     64-79   : cs<0-7>, cy<00|04|08|12>, Cy<00|04|08|12>
-    80-115  : m, n, ldc, ldc1, ldc4, ldc8, ldc60, writeCs, readCs, tid96, cx, ci, xmad2, D
+    80-115  : m, n, ldc, ldc1, ldc4, ldc8, ldc60, writeCs, readCs, cx, ci, xmad2, D
 
 </REGISTER_MAPPING>
 
@@ -65,7 +65,8 @@
 <SCHEDULE_BLOCK>
 
 // First 128 threads load A to shared, 2nd 128 loads B to shared
-// Note this technique is not possible in cuda or ptx as there's no way to specify a warp-uniform predicate for a memory op.
+// Note this technique is not possible in cuda or ptx as there's no way to
+// efficiently specify a warp-uniform predicate for a memory op.
 // Compile sgemm.cu and inspect the sass to see what I'm talking about.
 
 // blk = tid >= 128 ? by   : bx;
@@ -84,14 +85,18 @@
 --:-:-:-:1      LOP.AND zOffset, tid, -32;
 --:-:-:-:1      STS.128 [zOffset + 4x<2048>], RZ;
 
-// tid31 = tid & 31
-// tid4  = (tid >> 5) & 3
---:-:-:-:1      LOP.AND tid31, tid, 31;
---:-:-:-:1      BFE.U32 tid4,  tid, 0x205;
+// tid4   = (tid >> 5) & 3
+// tid31  = tid & 31
+// tid96  = tid & 96
+// tid128 = tid & 128
+--:-:-:-:1      BFE.U32 tid4,   tid, 0x205;
+--:-:-:-:1      LOP.AND tid31,  tid, 31;
+--:-:-:-:1      LOP.AND tid96,  tid, 96;
+--:-:-:-:1      LOP.AND tid128, tid, 128;
 
 // ldx4  = ldx * 4;
 // ldx8  = ldx * 8;
---:-:-:-:1      SHL  ldx4, ldx, 2;
+--:-:-:-:1      SHL  ldx4, ldx,  2;
 --:-:-:-:1      IADD ldx8, ldx4, ldx4;
 
 // track0 = blk*128 + tid31 + (ldx * tid4)
@@ -120,14 +125,13 @@
 --:-:-:-:1      XMAD.LO end, k, ldx, track0, xmad1;
 
 // readAs and readBs are carefully constructed to avoid any bank conflicts while loading from shared
-// readAs = (((tid & 0x80) >> 4) | ((tid >> 1) & 7)) << 4;
+// readAs = ((tid128 >> 4) | ((tid >> 1) & 7)) << 4;
 --:-:-:-:1      BFE.U32 tid7,   tid,    0x301;
---:-:-:-:1      LOP.AND readAs, tid,    0x80;
---:-:-:-:1      SHR.U32 readAs, readAs, 4;
+--:-:-:-:1      SHR.U32 readAs, tid128, 4;
 --:-:-:-:1      LOP.OR  readAs, readAs, tid7;
 --:-:-:-:1      SHL     readAs, readAs, 4;
 
-// readBs  = ((($tid & 0x70) >> 3) | ($tid & 1)) << 4 + 4096;
+// readBs  = (((tid & 0x70) >> 3) | (tid & 1)) << 4 + 4096;
 --:-:-:-:1      LOP.AND tid1,   tid,    1;
 --:-:-:-:1      LOP.AND readBs, tid,    0x70;
 --:-:-:-:1      SHR.U32 readBs, readBs, 3;
@@ -135,10 +139,10 @@
 --:-:-:-:1      ISCADD  readBs, readBs, 4x<1024>, 4;
 
 // Preload the first 8 lines from texture memory
-// Break this up into two barriers so we can load 4 at a time (works faster in main loop so do here as well).
+// Break this up into two barriers so we can load 4 at a time along a single cache line.
 // Keep these instructions in this order (but allow others to interleave).
-// Normally the scheduler tries to preserve source order by default, but in this case
-// the IADDs to the track variables in linear mode can make a later instruction ready before a preceeding one.
+// Normally the scheduler tries to preserve source order by default, but this demonstrates how you enforce
+// an ordering if you need to.
 <ORDERED>
 --:-:-:-:1      TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;
 --:-:-:-:1      TLD.B.LZ.T loadX1, track1, tex, 0x0, 1D, 0x1;
@@ -175,6 +179,11 @@
 --:-:-:-:1      IADD track6, track6, ldx8;
 --:-:-:-:1      IADD track7, track7, ldx8;
 
+// Wait for all threads to finish loading shared
+--:-:-:-:5      BAR.SYNC 0x0;
+
+</SCHEDULE_BLOCK>
+
 // Initialize C registeres to zero
 // Using LDS.U.128 is a neat trick to save a few clock cyles
 // (when you have enough warps to hide the latency.)
@@ -182,10 +191,9 @@
     return join '', map sprintf("--:-:-:-:1      LDS.U.128 cz%02d, [zOffset + 4x<2048>];\n", $_ * 4), 0..15;
 </CODE>
 
-// Wait for all threads to finish loading shared
---:-:-:-:5      BAR.SYNC 0x0;
-
-</SCHEDULE_BLOCK>
+// The next store to shared goes to high area.
+// Having 2 share buffers allows us to eliminate a bar.sync in the main loop
+--:-:-:-:0      LOP.XOR writeS, writeS, 4x<2048>;
 
 // Preload the fist lines of A and B from shared
 --:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<0*128 + 00>];
@@ -193,9 +201,6 @@
 --:-:-:-:1      LDS.U.128 j0Ax64, [readAs + 4x<0*128 + 64>];
 --:-:1:-:1      LDS.U.128 j0By64, [readBs + 4x<0*128 + 64>]; // Set Dep 1
 
-// Next store to shared goes to high area.
-// Having 2 share buffers allows us to eliminate a bar.sync in the main loop
---:-:-:-:1      LOP.XOR writeS, writeS, 4x<2048>;
 
 // The main loop
 // While calculating the first line, load in the next line from shared.
@@ -397,13 +402,11 @@ LOOP:
 // Read out the C values from shared in a simple tid mapped pattern but
 // offset by the position of this warp's data in shared.
 
-// cx = tid31 | ((tid & 128) >> 2);
---:-:-:-:1      LOP.AND  cx, tid,   128;
---:-:-:-:1      SHR.U32  cx, cx,    2;
---:-:-:-:1      LOP.OR   cx, tid31, cx;
+// cx = tid31 | (tid128 >> 2);
+--:-:-:-:1      SHR.U32  cx, tid128, 2;
+--:-:-:-:1      LOP.OR   cx, tid31,  cx;
 
 //readCs = ((tid96 << 4) | cx) << 2;
---:-:-:-:1      LOP.AND  tid96,  tid,    0x60;
 --:-:-:-:1      SHL      readCs, tid96,  4;
 --:-:-:-:1      LOP.OR   readCs, readCs, cx;
 --:-:-:-:1      SHL      readCs, readCs, 2;
@@ -448,7 +451,7 @@ LOOP:
 --:-:-:-:1      SHL  ldc8,  ldc, 5;
 --:-:-:-:1      ISCADD ldc60, ldc, -ldc4, 8;
 
-// We pre-increment the output addresses to all them to be dual issued with memory ops
+// We pre-increment the output addresses so they can be dual issued with memory ops
 // So start with a -1 instead of 0 value.
 --:-:-:-:1      IADD Cy00, Cy00, -ldc1;
 --:-:-:-:1      IADD Cy04, Cy00, ldc4;

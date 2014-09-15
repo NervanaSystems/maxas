@@ -138,6 +138,7 @@ elsif ($mode =~ /^\-?\-i/i)
 # Preprocessing:
 elsif ($mode =~ /^\-?\-p/i)
 {
+    my $debug     = shift if $ARGV[0] =~ /^\-?\-d/i;
     my $doReg     = shift if $ARGV[0] =~ /^\-?\-r/i;
     my $asmFile   = shift or usage();
     my $asmFile2  = shift;
@@ -157,7 +158,7 @@ elsif ($mode =~ /^\-?\-p/i)
     {
         $fh = \*STDOUT;
     }
-    print $fh MaxAs::Preprocess($file, $doReg);
+    print $fh MaxAs::Preprocess($file, $doReg, $debug);
     close $fh;
 }
 else
@@ -183,7 +184,7 @@ Usage:
   Also useful for extending the missing grammar rules.  Defaults to only showing failures without --all.
   With the --reg flag it will show register bank conflicts not hidden by reuse flags.
 
-    maxas.pl --test|-t [--reg|-r] [--all|-a] <cubin_file | sass_file>
+    maxas.pl --test|-t [--reg|-r] [--all|-a] <cubin_file | cuobjdump_sass_file>
 
   Extract a single kernel into an asm file from a cubin.
   Works much like cuobjdump but outputs in a format that can be re-assembled back into the cubin:
@@ -191,9 +192,9 @@ Usage:
     maxas.pl --extract|-e [--kernel|-k kernel_name] <cubin_file> [asm_file]
 
   Preprocess the asm (expand CODE sections, perform scheduling, optionally do register renaming).
-  Mainly used for debugging purposes:
+  Mainly used for debugging purposes.  Include the debug flag to print out detailed scheduler info.
 
-    maxas.pl --pre|-p [--reg|-r] <asm_file> [new_asm_file]
+    maxas.pl --pre|-p [--debug|-d] [--reg|-r] <asm_file> [new_asm_file]
 
   Insert the kernel asm back into the cubin.  Overwrite existing or create new cubin.
   Optionally you can skip register reuse flag auto insertion.  This allows you to observe
