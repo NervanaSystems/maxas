@@ -28,7 +28,7 @@
     33,32,41,40,49,48,57,56 : cx66y<00-03|64-67>
     37,36,45,44,53,52,61,60 : cx67y<00-03|64-67>
 
-    // Double buffered register blocking
+    // Double buffered register blocking used in vector loads.
     // Any bank conflicts that we can't avoid in these registers we can hide with .reuse flags
     64-79   : j0Ax<00-03|64-67>, j0By<00-03|64-67>
     80-95   : j1Ax<00-03|64-67>, j1By<00-03|64-67>
@@ -36,21 +36,24 @@
     // The offset we store our zero value for initializing C
     // Reuse a register from the second blocking registers
     80      : zOffset
-    // Aliases for the C registers we use for initializing C
+    // Aliases for the C registers we use for initializing C (used as vectors)
     0-63    : cz<00-63>
 
     // Registers to load A or B
     96-103  : loadX<0-7>
 
     // Key state registers for main loop and some we reuse for outputing C
-    104-127 : track<0-7>, ldx8, end, tex, writeS, readAs, readBs, tid, tid31, tid96, tid128, bx, by
+    104-127 : track<0-7>, tex, end, ldx8, writeS, readAs, readBs, tid, tid31, tid96, tid128, bx, by
 
     // Temporary registers to calculate the state registers. Reuse the C output registers.
-    0-63    : blk, ldx, ldx2, ldx4, k, tid1, tid4, tid7, xmad<0-1>
+    // These can be dynamically allocated (~) in the available registger space to elimiate any register bank conflicts.
+    0-63    ~ blk, ldx, ldx2, ldx4, k, tid1, tid4, tid7, xmad<0-1>
 
     // Registers to store the results back to global memory. Reuse any register not needed after the main loop.
-    64-79   : cs<0-7>, cy<00|04|08|12>, Cy<00|04|08|12>
-    80-115  : m, n, ldc, ldc1, ldc4, ldc8, ldc60, writeCs, readCs, cx, ci, xmad2, D
+    // Statically allocate cs0-7 because they're vector reegisters
+    64-71   : cs<0-7>
+    // dynamically allocated (~)
+    72-115  ~ cy<00|04|08|12>, Cy<00|04|08|12>, m, n, ldc, ldc1, ldc4, ldc8, ldc60, writeCs, readCs, cx, ci, xmad2, D
 
 </REGISTER_MAPPING>
 

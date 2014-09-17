@@ -3,8 +3,6 @@ use strict;
 
 print `maxas.pl -p sgemm.sass sgemm_preprocessed.sass`;
 
-print `maxas.pl -p -r sgemm.sass sgemm_preprocessed_regmap.sass`;
-
 print `maxas.pl -i sgemm.sass sgemm.cubin`;
 
 exit if $?;

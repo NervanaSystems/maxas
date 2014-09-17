@@ -5,7 +5,7 @@ use Exporter;
 use Data::Dumper;
 our @ISA = qw(Exporter);
 
-our @EXPORT = qw(%grammar %flags genCode);
+our @EXPORT = qw(%grammar %flags genCode genReuseCode);
 
 require 5.10.0;
 
@@ -878,6 +878,15 @@ my %constCodes =
     c39 => 0x08,
 );
 my %reuseCodes = (reuse1 => 1, reuse2 => 2, reuse3 => 4);
+
+# just pick out the reuse code and nothing else
+sub genReuseCode
+{
+    my $capData = shift;
+    my $reuse = 0;
+    $reuse |= $reuseCodes{$_} foreach grep $capData->{$_}, keys %reuseCodes;
+    return $reuse;
+}
 
 # Generate an op code from regex capture data
 # if you pass in a test array ref it will populate it with the matching capture groups
