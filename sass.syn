@@ -1,0 +1,242 @@
+C=1
+
+[Syntax]
+
+
+
+; a number in the range 1 to 6, which specifies how many of the keyword sections are in the first namespace.
+;There is only one namespace when "C=1" or "LaTeX=1", so this value must be 6. There are two namespaces when "HTML=1",
+;so this value can be between 1 and 5, and defaults to 1. Change it to 2, say,
+;if you want to be able to display HTML tags in two colors,
+;and split the tag keywords between the [Keywords 1] and [Keywords 2] sections, depending on which color you want them in.
+Namespace1 = 6
+
+
+;"Yes" if keywords are not case sensitive, otherwise "No".
+IgnoreCase = No
+KeyWordLength = 0
+
+;characters that can be used for brackets.
+BracketChars = {}[]<>
+
+;characters that can be used for operators.
+OperatorChars = @!*/%+-><=&^|&?:~()
+
+; the character used to start a pre-processor statement.
+PreprocStart =
+
+;the characters that prefix hexadecimal numbers. If this entry is omitted, it defaults to "0x".
+HexPrefix = 0x
+
+;a string of characters that switch on keyword recognition (e.g. "<"), or leave blank.
+SyntaxStart =
+
+;a string of characters that switch off keyword recognition (e.g. ">"), or leave blank.
+SyntaxEnd =
+
+;a string of characters that start a multiple line comment, or leave blank.
+CommentStart = /*
+
+;a string of characters that end a multiple line comment, or leave blank.
+CommentEnd = */
+
+;an alternative string of characters that start a multiple line comment.
+CommentStartAlt =
+
+;an alternative string of characters that end a multiple line comment.
+CommentEndAlt =
+
+;a string of characters that start a single line comment (e.g. "//" or "REM"), or leave blank.
+SingleComment = //
+SingleCommentCol =
+
+;an alternative string of characters that start a single line comment (e.g. "//" or "REM"), or leave blank.
+SingleCommentAlt = #
+SingleCommentColAlt =
+
+;The character that is used to escape either of the SingleComment strings.
+SingleCommentEsc =
+StringsSpanLines =
+
+;The character that indicates the start of a string (e.g. double quote).
+StringStart = "
+
+;The character that indicates the end of a string (e.g. double quote).
+StringEnd = "
+
+;An alternative character that can be used to delimit strings, if the string contains the StringEnd character.
+StringAlt =
+
+;The character that is used to escape the StringEnd character, if it is part of a string (e.g. "\").
+StringEsc =
+
+;The character that is used to start a character literal (e.g. single quote).
+CharStart = '
+
+;The character that is used to end a character literal (e.g. single quote).
+CharEnd = '
+
+;The character that is used to escape the CharEnd character, if it is part of a character literal (e.g. "\").
+CharEsc =
+
+[Keywords 1]
+
+ATOM
+ATOMS
+B2R
+BAR
+BFE
+BFI
+BPT
+BRA
+BRK
+BRX
+CAL
+CCTL
+CCTLL
+CCTLT
+CONT
+CS2R
+CSET
+CSETP
+DADD
+DEPBAR
+DFMA
+DMNMX
+DMUL
+DSET
+DSETP
+EXIT
+F2F
+F2I
+FADD
+FADD32I
+FCHK
+FCMP
+FFMA
+FLO
+FMNMX
+FMUL
+FMUL32I
+FSET
+FSETP
+FSWZADD
+I2F
+I2I
+IADD
+IADD3
+IADD32I
+ICMP
+IMAD
+IMADSP
+IMNMX
+IMUL
+ISCADD
+ISCADD32I
+ISET
+ISETP
+JCAL
+JMP
+JMX
+LD
+LDC
+LDG
+LDL
+LDS
+LEA
+LOP
+LOP3
+LOP32I
+MEMBAR
+MOV
+MOV32I
+MUFU
+NOP
+P2R
+PBK
+PCNT
+PEXIT
+POPC
+PRET
+PRMT
+PSET
+PSETP
+R2B
+R2P
+RED
+RET
+RRO
+S2R
+SEL
+SHF
+SHFL
+SHL
+SHR
+SSY
+ST
+STG
+STL
+STS
+SUATOM
+SULD
+SURED
+SUST
+SYNC
+TEX
+TEXS
+TLD
+TLD4
+TLD4S
+TLDS
+TXQ
+VADD
+VOTE
+XMAD
+TLD
+TLDS
+BAR.SYNC
+BFE.U32
+ISETP.GE.AND
+ISETP.LE.AND
+ISETP.LT.AND
+LDS.U.128
+LOP.AND
+LOP.OR
+LOP.XOR
+LOP3.LUT
+SHFL.IDX
+SHR.U32
+STG.CS
+STG.CG
+STG.E.CG
+STS.128
+TLD.B.LZ.T
+TLD.B.LZ.P
+XMAD.LO
+XMAD.MRG
+XMAD.PSL
+XMAD.PSL.CBCC
+reuse
+
+[Keywords 2]
+
+SR_LANEID
+SR_VIRTCFG
+SR_VIRTID
+SR_VIRTID
+SR_TID.X
+SR_TID.Y
+SR_TID.Z
+SR_CTAID.X
+SR_CTAID.Y
+SR_CTAID.Z
+SR_EQMASK
+SR_LTMASK
+SR_LEMASK
+SR_GTMASK
+SR_GEMASK
+SR_CLOCKLO
+SR_CLOCKHI
+SR_GLOBALTIMERLO
+SR_GLOBALTIMERHI
+
