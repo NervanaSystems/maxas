@@ -184,6 +184,7 @@ sub Assemble
         }
     }
     # calculate register live times and preferred banks for non-fixed registers.
+    # LiveTime only half implemented...
     my (%liveTime, %pairedBanks, %reuseHistory);
     foreach my $i (0 .. $#instructs)
     {
@@ -255,6 +256,7 @@ sub Assemble
                             {
                                 my $bank = substr($regMap->{$r2},1) & 3;
                                 $pairedBanks{$r}{bnkCnt}++ unless $pairedBanks{$r}{banks}[$bank]++;
+                                $pairedBanks{$r}{pairs} ||= [];
                             }
                             # Update the total use count for this register.
                             # This will be the number of times the register is pulled out of the bank.

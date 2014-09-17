@@ -195,7 +195,9 @@
 </CODE>
 
 // The next store to shared goes to high area.
-// Having 2 share buffers allows us to eliminate a bar.sync in the main loop
+// Having 2 share buffers allows us to eliminate a bar.sync in the main loop.
+// This way we don't have to wait for all threads to arrive before writing fresh data to shared.
+// Other threads can continue reading from the last batch while the new data is being written.
 --:-:-:-:0      LOP.XOR writeS, writeS, 4x<2048>;
 
 // Preload the fist lines of A and B from shared
