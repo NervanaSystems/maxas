@@ -636,7 +636,7 @@ sub Scheduler
     my $vectors = $regMap->{__vectors};
     my $lineNum = 0;
 
-    my (@instructs, @comments, $ordered);
+    my (@instructs, @comments, $ordered, $first);
     foreach my $line (split "\n", $block)
     {
         # keep track of line nums in the physical file
@@ -651,6 +651,8 @@ sub Scheduler
         # match an instruction
         if (my $inst = processAsmLine($line, $lineNum))
         {
+            # if the first instruction in the block is waiting on a dep, it should go first.
+            $inst->{first}   = !$first++ && ($inst->{ctrl} & 0x1f800) ? 1 : 0;
             $inst->{exeTime} = 0;
             $inst->{order}   = $ordered++ if $ordered;
             push @instructs, $inst;
@@ -785,9 +787,16 @@ sub Scheduler
 
         # sort the initial ready list
         @ready = sort {
+            $b->{first}   <=> $a->{first}  ||
             $b->{deps}    <=> $a->{deps}   ||
             $a->{lineNum} <=> $b->{lineNum}
             } @ready;
+
+        if ($debug)
+        {
+            print  "0: Initial Ready List State:\n\tf,ext,stl,mix,dep,lin, inst\n";
+            printf "\t%d,%3s,%3s,%3s,%3s,%3s, %s\n", @{$_}{qw(first exeTime stall mix deps lineNum inst)} foreach @ready;
+        }
     }
 
     # Process the ready list, adding new instructions to the list as we go.
