@@ -80,11 +80,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <None Include="sgemm.cu" />
-    <None Include="sgemm.sass" />
+    <ClCompile Include="sgemm.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="sgemm.cpp" />
+    <None Include="sgemm128.sass" />
+    <None Include="sgemm64.sass" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

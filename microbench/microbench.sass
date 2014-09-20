@@ -11,6 +11,14 @@
 
 // This is a simple micro bench to demonstrate the latency in loading SR_TID.X
 
+//blockDim.x c[0x0][0x08]
+//blockDim.y c[0x0][0x0c]
+//blockDim.z c[0x0][0x10]
+//gridDim.x  c[0x0][0x14]
+//gridDim.y  c[0x0][0x18]
+//gridDim.z  c[0x0][0x1c]
+
+
 <REGISTER_MAPPING>
 
     0-20 : out, clocks, in, tid, bid, blockDim, clock1, clock2, result, x

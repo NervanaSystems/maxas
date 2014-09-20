@@ -156,8 +156,8 @@ sub new
     }
 
     # verify sm_50 cubin
-    my $sm = $elfHdr->{flags} & 0xFF;
-    die "Cubin not in sm_50 format. Found: sm_$sm\n" if $sm != 50;
+    $cubin->{Arch} = $elfHdr->{flags} & 0xFF;
+    die "Cubin not in sm_50 or greater format. Found: sm_$cubin->{Arch}\n" if $cubin->{Arch} < 50;
 
     # Read in Program Headers
     seek $fh, $elfHdr->{phOffset}, 0;
@@ -308,7 +308,10 @@ sub new
     }
     return $cubin;
 }
-
+sub arch
+{
+    return shift()->{Arch};
+}
 sub listKernels
 {
     return shift()->{Kernels};

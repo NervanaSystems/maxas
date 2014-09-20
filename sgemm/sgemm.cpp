@@ -11,7 +11,7 @@
 CUcontext      hContext = 0;
 cublasHandle_t hCublas  = 0;
 
-float assemblySgemm(CUdeviceptr devC, CUdeviceptr devA, CUdeviceptr devB, int N, CUevent hStart, CUevent hStop, int repeat = 1, int printVars = 0);
+float assemblySgemm(const char* kernel, CUdeviceptr devC, CUdeviceptr devA, CUdeviceptr devB, int N, CUevent hStart, CUevent hStop, int repeat = 1, int printVars = 0);
 void gflops(const char* ident, int N, float ms, int repeat);
 void test(float* C, float* T, int N, size_t size);
 
@@ -56,7 +56,7 @@ int main(int argc, char* argv[])
 		CUDA_CHECK( cuDeviceGetName(deviceName, sizeof(deviceName), hDevice) );
 		if (major >= 5)
 		{
-			printf("Using: Id:%d %s (%d.%d)\n\n", ordinal, deviceName, major, minor);
+			//printf("Using: Id:%d %s (%d.%d)\n\n", ordinal, deviceName, major, minor);
 			break;
 		}
 	}
@@ -66,12 +66,12 @@ int main(int argc, char* argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	// First command line arg is the size of N divided by 128
-	int thread128 = 40;
+	// First command line arg is the size of N divided by 64
+	int thread64 = 80;
 	if (argc > 1)
-		thread128 = atoi(argv[1]);
-	if (thread128 > 40 || thread128 < 1)
-		thread128 = 1;
+		thread64 = atoi(argv[1]);
+	if (thread64 > 80 || thread64 < 1)
+		thread64 = 80;
 
 	// Second command line arg is the repeat count for benchmarking
 	int repeat = 1;
@@ -87,7 +87,7 @@ int main(int argc, char* argv[])
 	if (printVars > 100 || printVars < 1)
 		printVars = 0;
 
-	int N = thread128 * 128;
+	int N = thread64 * 64;
 	size_t size = sizeof(float) * N * N;
 	float alpha = 1, beta = 0, ms = 1;
 
@@ -105,6 +105,7 @@ int main(int argc, char* argv[])
 	{
 		A[i] = (float)rand() / (float)RAND_MAX;
 		B[i] = (float)rand() / (float)RAND_MAX;
+		//A[i] = B[i] = 1.0f; // * (i & 3) + 1.0f;
 		//A[i] = 1.0f;
 		//B[i * N + counter++] = 1.0f; // identity matrix
 	}
@@ -112,8 +113,8 @@ int main(int argc, char* argv[])
 	CUDA_CHECK( cuCtxCreate(&hContext, 0, hDevice) );
 	CUBLAS_CHECK( cublasCreate(&hCublas) );
 	
-	CUDA_CHECK( cuEventCreate(&hStart, CU_EVENT_BLOCKING_SYNC) );
-	CUDA_CHECK( cuEventCreate(&hStop,  CU_EVENT_BLOCKING_SYNC) );
+	CUDA_CHECK( cuEventCreate(&hStart, CU_EVENT_DEFAULT) ); // CU_EVENT_BLOCKING_SYNC 
+	CUDA_CHECK( cuEventCreate(&hStop,  CU_EVENT_DEFAULT) );
 
 	CUDA_CHECK( cuMemAlloc(&devA, size) );
 	CUDA_CHECK( cuMemAlloc(&devB, size) );
@@ -131,17 +132,20 @@ int main(int argc, char* argv[])
 			CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
 
 	// Launch our kernel
-	ms = assemblySgemm(devC, devA, devB, N, hStart, hStop, repeat, printVars);
-	gflops("MaxAs ", N, ms, repeat);
+	ms = assemblySgemm("sgemm_kernel_64",  devC, devA, devB, N, hStart, hStop, repeat, printVars);
+	gflops("Max64 ", N, ms, repeat);
+
+	ms = assemblySgemm("sgemm_kernel_128", devC, devA, devB, N, hStart, hStop, repeat, printVars);
+	gflops("Max128", N, ms, repeat);
 
 	// Run cublas again for the same repeat count for comparison
 	CUDA_CHECK( cuEventRecord(hStart, NULL) );
-	for (int i = 0; i < repeat; i++)
+	for (int i = 0; i < 1; i++)
 		CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
 	CUDA_CHECK( cuEventRecord(hStop, NULL) );
 	CUDA_CHECK( cuEventSynchronize(hStop) );
 	CUDA_CHECK( cuEventElapsedTime(&ms, hStart, hStop) );
-	gflops("Cublas", N, ms, repeat);
+	gflops("Cublas", N, ms, 1);
 
 	// Get back our results from each kernel
 	CUDA_CHECK( cuMemcpyDtoH(C, devC, size) );
@@ -171,7 +175,7 @@ int main(int argc, char* argv[])
 }
 
 // Our kernel wrapper function
-float assemblySgemm(CUdeviceptr devC, CUdeviceptr devA, CUdeviceptr devB, int N, CUevent hStart, CUevent hStop, int repeat, int printVars)
+float assemblySgemm(const char* kernel, CUdeviceptr devC, CUdeviceptr devA, CUdeviceptr devB, int N, CUevent hStart, CUevent hStop, int repeat, int printVars)
 {
 	// Configure our x and y grid dimensions (assume nice square matrixes).
 	// Each block gets 128 tracks from A and 128 tracks from B.
@@ -179,7 +183,19 @@ float assemblySgemm(CUdeviceptr devC, CUdeviceptr devA, CUdeviceptr devB, int N,
 	// See Figure 2 here to get the gist of things (we use a different mapping to maximize LDS.128 usage):
 	// http://icl.cs.utk.edu/projectsfiles/magma/pubs/fermi_gemm.pdf
 
-	int gridDimXY = N/128 + (N%128 != 0);
+	int threads, width;
+	if (strcmp(kernel, "sgemm_kernel_64") == 0)
+	{
+		threads = 64;
+		width   = 64;
+	}
+	else
+	{
+		threads = 256;
+		width   = 128;
+	}
+
+	int gridDimXY = N / width + (N % width != 0);
 	int blocks    = gridDimXY * gridDimXY;
 	size_t size   = sizeof(float)*N*N;
 
@@ -190,8 +206,8 @@ float assemblySgemm(CUdeviceptr devC, CUdeviceptr devA, CUdeviceptr devB, int N,
 
 	if (printVars)
 	{
-		sizeD = blocks * 256 * printVars * sizeof(int);
-		D     = (int*)malloc(sizeD);
+		sizeD = blocks * threads * printVars * sizeof(int);
+		D = (int*)malloc(sizeD);
 
 		CUDA_CHECK( cuMemAlloc(&devD, sizeD) );
 		CUDA_CHECK( cuMemsetD8(devD, 0, sizeD) );
@@ -207,29 +223,38 @@ float assemblySgemm(CUdeviceptr devC, CUdeviceptr devA, CUdeviceptr devB, int N,
 	CUDA_CHECK( cuModuleGetTexRef(&texB, hModule, "texB") );
 
 	// Configure the textures
-	CUDA_CHECK( cuTexRefSetFormat(texA, CU_AD_FORMAT_FLOAT, 1) );
-	CUDA_CHECK( cuTexRefSetFormat(texB, CU_AD_FORMAT_FLOAT, 1) );
+	CUDA_CHECK( cuTexRefSetFormat(texA, CU_AD_FORMAT_FLOAT, 4) );
+	CUDA_CHECK( cuTexRefSetFormat(texB, CU_AD_FORMAT_FLOAT, 4) );
 
 	CUDA_CHECK( cuTexRefSetAddress(NULL, texA, devA, size) );
 	CUDA_CHECK( cuTexRefSetAddress(NULL, texB, devB, size) );
 
 	// Load the kernel function
 	CUfunction hKernel;
-	CUDA_CHECK( cuModuleGetFunction(&hKernel, hModule, "sgemm_kernel_128") );
+	CUDA_CHECK( cuModuleGetFunction(&hKernel, hModule, kernel) );
 
 	// Setup the params
-	void* params[] = { &devC, &N, &N, &N, &N, &N, &N, &devD };
+	float alpha = 1.0f;
+	void* params[] = { &devC, &N, &N, &N, &N, &N, &N, &alpha, &devD };
 
-	CUDA_CHECK( cuEventRecord( hStart, NULL ) );
-	
-	// Launch the kernel
-	for (int i = 0; i < repeat; i++)
-		CUDA_CHECK( cuLaunchKernel(hKernel, gridDimXY, gridDimXY, 1, 256, 1, 1, 0, 0, params, 0) );
+	float totalTime = 0;
+	// Launch the kernel repeat times.. but break it up into pieces so as not to lock things up.
+	while (repeat > 0)
+	{
+		float ms;
+		int r = repeat > 2 ? 2 : repeat;
+		CUDA_CHECK( cuEventRecord( hStart, NULL ) );
+		
+		for (int i = 0; i < r; i++)
+			CUDA_CHECK( cuLaunchKernel(hKernel, gridDimXY, gridDimXY, 1, threads, 1, 1, 0, 0, params, 0) );
+		
+		CUDA_CHECK( cuEventRecord( hStop, NULL ) );
+		CUDA_CHECK( cuEventSynchronize( hStop ) );
+		CUDA_CHECK( cuEventElapsedTime( &ms, hStart, hStop ) );
+		totalTime += ms;
+		repeat -= r;
+	}
 
-	float ms;
-	CUDA_CHECK( cuEventRecord( hStop, NULL ) );
-	CUDA_CHECK( cuEventSynchronize( hStop ) );
-	CUDA_CHECK( cuEventElapsedTime( &ms, hStart, hStop ) );
 
 	CUDA_CHECK( cuModuleUnload(hModule) );
 
@@ -238,34 +263,28 @@ float assemblySgemm(CUdeviceptr devC, CUdeviceptr devA, CUdeviceptr devB, int N,
 	{
 		CUDA_CHECK( cuMemcpyDtoH(D, devD, sizeD) );
 		CUDA_CHECK( cuMemFree(devD) );
+		int   *iD = D;
 		float *fD = reinterpret_cast<float*>(D);
 
 		for (int by = 0; by < gridDimXY; by++)
 		{
 			for (int bx = 0; bx < gridDimXY; bx++)
 			{
-				int blk = bx * by;
-				for (int tid = 0; tid < 256; tid++)
+				for (int tid = 0; tid < threads; tid++)
 				{
-					int i = blk + tid;
-					printf("by: %3d, bx: %3d, tid:%3d, rA:%5d, rB:%5d, wr:%5d, rd:%5d, cx:%5d, cy:%5d, ci:%5d, c:%.2f\n", 
-						by, bx, tid, 
-						D[i + 0 * 256]/4,
-						D[i + 1 * 256]/4,
-						D[i + 2 * 256]/4,
-						D[i + 3 * 256]/4,
-						D[i + 4 * 256],
-						D[i + 5 * 256],
-						D[i + 6 * 256],
-					   fD[i + 7 * 256]
+					//printf("by: %3d, bx: %3d, tid:%3d, rA:%5d, rB:%5d, wr:%5d, rd:%5d, cx:%5d, cy:%5d, ci:%5d, c:%.2f\n", 
+					printf("by: %3d, bx: %3d, tid:%3d, t0:%5d, end:%5d, k:%5d, tid2:%5d, tid15:%5d, ldx:%5d, t2:%5d, t4:%5d\n", 
+						    by,      bx,      tid,     iD[0],  iD[1],   iD[2], iD[3],    iD[4],     iD[5],   iD[6],  iD[7]
 					);
+					iD += printVars;
+					fD += printVars;
 				}
 			}
 		}
 		free(D);
 	}
 
-	return ms;
+	return totalTime;
 }
 
 void gflops(const char* ident, int N, float ms, int repeat)
@@ -296,14 +315,14 @@ void test(float* C, float* T, int N, size_t size)
 						if (c != t)
 						{
 							errors++;
-							fprintf(file, "%.0f!%.0f\t", c , t);
-							//fprintf(file, "%.0f!", c);
+							//fprintf(file, "%.0f!%.0f\t", c , t);
+							fprintf(file, "%.0f!", c);
 							//fprintf(file, "!");
 						}
 						else
 						{
-							fprintf(file, "%.0f=%.0f\t", c , t);
-							//fprintf(file, "%.0f=", c);
+							//fprintf(file, "%.0f=%.0f\t", c , t);
+							fprintf(file, "%.0f=", c);
 							//fprintf(file, "=");
 						}
 					}

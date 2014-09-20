@@ -22,7 +22,7 @@
 #include <cuda_texture_types.h>
 #include <texture_fetch_functions.h>
 
-typedef texture<float, cudaTextureType1D, cudaReadModeElementType> floatTex;
+typedef texture<float4, cudaTextureType1D, cudaReadModeElementType> floatTex;
 
 floatTex  texA(0, cudaFilterModePoint, cudaAddressModeBorder);
 floatTex  texB(0, cudaFilterModePoint, cudaAddressModeBorder);
@@ -33,11 +33,12 @@ extern "C"
 __global__ void __launch_bounds__(256) sgemm_kernel_128(
 	float *C,
 	const int m,   const int n,   const int k,
-	const int lda, const int ldb, const int ldc, int *D)
+	const int lda, const int ldb, const int ldc,
+	float alpha, int *D)
 {
 	// Declare any shared memory your kernel requires
 	// Or you could just pass the amount in as a param to cuLaunchKernel
-	__shared__ float share[4096];
+	__shared__ float4 share[1024];
 
 	int tid = threadIdx.x;
 
@@ -51,10 +52,30 @@ __global__ void __launch_bounds__(256) sgemm_kernel_128(
 	__syncthreads();
 
 	// output something so your setup isn't optimized away.
-	C[tid] = share[255-tid];
+	C[tid] = share[255-tid].x;
 }
 
-// A note about using the Cuda Runtime.  
+extern "C"
+__global__ void __launch_bounds__(64) sgemm_kernel_64(
+	float *C,
+	const int m,   const int n,   const int k,
+	const int lda, const int ldb, const int ldc,
+	float alpha, int *D)
+{
+	__shared__ float4 share[512];
+
+	int tid = threadIdx.x;
+
+	floatTex tex = tid > 127 ? texB : texA;
+
+	share[tid] = tex1Dfetch(tex, tid);
+
+	__syncthreads();
+
+	C[tid] = share[255-tid].x;
+}
+
+// A note about using the Cuda Runtime.
 // If that's your preference over the driver API then here's what you'd do:
 
 // In your project properties in the Cuda C/C++ panel:
@@ -64,10 +85,10 @@ __global__ void __launch_bounds__(256) sgemm_kernel_128(
 // Rebuild your solution and look in the log for these lines that follow the ptxas step:
 
 // #$ fatbinary --create="Release/kernel.fatbin" -32 --key="a7bce87544c2a492" --ident="C:/Users/Scott/Documents/sgemm6/sgemm6/kernel.cu" --cmdline="-v --opt-level 4 --generate-line-info " "--image=profile=sm_50,file=Release/kernel.sm_50.cubin" "--image=profile=compute_50,file=Release/kernel.ptx" --embedded-fatbin="Release/kernel.fatbin.c" --cuda
-// #$ cl.exe @Release/kernel.cu.cpp.ii.res > "Release/kernel.cu.cpp.ii" 
-// #$ cl.exe @Release/kernel.cu.obj.res -Fo"Release/kernel.cu.obj" 
+// #$ cl.exe @Release/kernel.cu.cpp.ii.res > "Release/kernel.cu.cpp.ii"
+// #$ cl.exe @Release/kernel.cu.obj.res -Fo"Release/kernel.cu.obj"
 
-// You just need to manually run these 3 commands (or add them to a build script) 
+// You just need to manually run these 3 commands (or add them to a build script)
 // after you've modified the cubin generated from the preceeding ptxas command.
 // That will give you a new .cu.obj file which will automatically be linked in for you next time you
 // build your project (or you could manually run the linker step as well).

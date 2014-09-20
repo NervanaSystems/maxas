@@ -9,13 +9,24 @@
 #   4:0x150:4:0 param_lda,
 #   5:0x154:4:0 param_ldb,
 #   6:0x158:4:0 param_ldc
-#   7:0x15c:4:4 param_D // for diagnostic printf output
+#   7:0x15c:4:0 param_alpha
+#   8:0x160:4:4 param_D // for diagnostic printf output
 #
 # Globals:
 #   c[0x0][0x160]: texA (the value is 1)
 #   c[0x0][0x164]: texB (the value is 0)
 
 <REGISTER_MAPPING>
+
+    // Temporary registers to calculate the state registers. Reuse the C output registers.
+    // These can be dynamically allocated (~) in the available registger space to elimiate any register bank conflicts.
+    0-63    ~ blk, ldx, ldx2, ldx4, k, tid1, tid4, tid7, tid31_4, xmad_t0, xmad_end
+
+    // Aliases for the C registers we use for initializing C (used as vectors)
+    0-63    : cz<00-63>
+
+    // The offset we store our zero value for initializing C. Reuse a register from the second blocking registers
+    80      : zOffset
 
     // 64 C maxtrix output registers.
     // Use special mapping to avoid register bank conflicts between these registers and the blocking registers.
@@ -33,29 +44,26 @@
     64-79   : j0Ax<00-03|64-67>, j0By<00-03|64-67>
     80-95   : j1Ax<00-03|64-67>, j1By<00-03|64-67>
 
-    // The offset we store our zero value for initializing C
-    // Reuse a register from the second blocking registers
-    80      : zOffset
-    // Aliases for the C registers we use for initializing C (used as vectors)
-    0-63    : cz<00-63>
-
     // Registers to load A or B
     96-103  : loadX<0-7>
 
-    // Key state registers for main loop and some we reuse for outputing C
-    104-127 : track<0-7>, tex, end, ldx8, writeS, readAs, readBs, tid, tid31, tid96, tid128, bx, by
-
-    // Temporary registers to calculate the state registers. Reuse the C output registers.
-    // These can be dynamically allocated (~) in the available registger space to elimiate any register bank conflicts.
-    0-63    ~ blk, ldx, ldx2, ldx4, k, tid1, tid4, tid7, xmad<0-1>
+    // Key global state registers for main loop and some we reuse for outputing C.
+    // Note, tweaking the register values of tex, track<0|4>, writeS, readBs, readAs impacts performance because of
+    // delayed bank conflicts between memory operations and ffmas.
+    104-127 : track<0|4>, end, tex, tid, ldx8, readAs, readBs, bx, by, writeS, tid31, tid96, tid128
+    //              0 1   2    3    0    1     2       3       0   1   2
 
     // Registers to store the results back to global memory. Reuse any register not needed after the main loop.
-    // Statically allocate cs0-7 because they're vector reegisters
+    // Statically allocate cs0-7 because they're vector reegisters.
     64-71   : cs<0-7>
-    // dynamically allocated (~)
-    72-115  ~ cy<00|04|08|12>, Cy<00|04|08|12>, m, n, ldc, ldc1, ldc4, ldc8, ldc60, writeCs, readCs, cx, ci, xmad2, D
+
+    // dynamically allocated C output registers(~)
+    72-103  ~ cy<00|04|08|12>, Cy<00|04|08|12>, ldc, ldc1, ldc4, ldc8, ldc60, writeCs, readCs, cx, ci, alpha, xmad_ci, xmad_D, D, blckDimX, gridDimX
 
 </REGISTER_MAPPING>
+
+// Note the absense of the loading of the stack pointer into R1.
+// No idea why ptxas does that anyway when it's not used for register spilling.
 
 // Scheduler doesn't handle the dependency flags yet,
 // so move these first instructions outside the block that's auto scheduled
@@ -77,16 +85,17 @@
 // tex = tid >= 128 ? texB : texA;
 01:-:-:Y:1      ISETP.GE.AND P0, PT, tid, 128, PT; // Wait Dep 1
 06:-:-:-:1      SEL blk, by, bx, P0;               // Wait Dep 2 & 3
---:-:-:-:1 @!P0 MOV ldx, c[0x0][0x150];
---:-:-:-:1  @P0 MOV ldx, c[0x0][0x154];
+--:-:-:-:1 @!P0 MOV ldx4, c[0x0][0x150];
+--:-:-:-:1  @P0 MOV ldx4, c[0x0][0x154];
 --:-:-:-:1 @!P0 MOV32I tex, 0x80000001; // texA
 --:-:-:-:1  @P0 MOV32I tex, 0x80000000; // texB
 
 // Initialize the portion of shared we use to zero our C registers
 // Give each warp its own address to write to.
 // All threads write to the same address, but we don't care because only one needs to take.
+// There is no bank conflict on writing to the same address, just indeterminacy in which thread will get its value stored.
 --:-:-:-:1      LOP.AND zOffset, tid, -32;
---:-:-:-:1      STS.128 [zOffset + 4x<2048>], RZ;
+--:-:-:-:1      STS.128 [zOffset + 4x<16*128>], RZ;
 
 // tid4   = (tid >> 5) & 3
 // tid31  = tid & 31
@@ -99,33 +108,24 @@
 
 // ldx4  = ldx * 4;
 // ldx8  = ldx * 8;
---:-:-:-:1      SHL  ldx4, ldx,  2;
+--:-:-:-:1      SHR.U32 ldx, ldx4, 2;
 --:-:-:-:1      IADD ldx8, ldx4, ldx4;
 
-// track0 = blk*128 + tid31 + (ldx * tid4)
---:-:-:-:1      ISCADD  track0, blk, tid31, 7;
---:-:-:-:1      XMAD.LO track0, ldx, tid4,  track0, xmad0; // XMAD.LO is a macro that is expanded out into the 3 XMADs
-
-// Setup 8 independent track vars so we don't need to synchronize between texture loads
---:-:-:-:1      IADD track1, track0, 32;
---:-:-:-:1      IADD track2, track0, 64;
---:-:-:-:1      IADD track3, track0, 96;
+// track0 = blk*128/4 + tid31 + (ldx * tid4)
+--:-:-:-:1      ISCADD  track0, blk, tid31, 5;
+--:-:-:-:1      XMAD.LO track0, ldx, tid4,  track0, xmad_t0; // XMAD.LO is a macro that is expanded out into the 3 XMADs
 --:-:-:-:1      IADD track4, track0, ldx4;
---:-:-:-:1      IADD track5, track1, ldx4;
---:-:-:-:1      IADD track6, track2, ldx4;
---:-:-:-:1      IADD track7, track3, ldx4;
 
-// writeS = (tid31 + tid4*128) * 4
---:-:-:-:1      ISCADD writeS, tid4,   tid31, 7;
---:-:-:-:1      SHL    writeS, writeS, 2;
-
+// writeS  = tid31*4*4 + tid4*128*4
 // writeS += 4096 if tid >= 128
---:-:-:-:1  @P0 IADD   writeS, writeS, 4x<1024>;
+--:-:-:-:1      SHL    tid31_4, tid31, 4;
+--:-:-:-:1      ISCADD writeS, tid4, tid31_4, 9;
+--:-:-:-:1  @P0 IADD   writeS, writeS, 4x<8*128>;
 
 // int end = track0 + (k-8)*ldx;
 --:-:-:-:1      MOV k, c[0x0][0x14c];
 --:-:-:-:1      IADD k, k, -8;
---:-:-:-:1      XMAD.LO end, k, ldx, track0, xmad1;
+--:-:-:-:1      XMAD.LO end, k, ldx, track0, xmad_end;
 
 // readAs and readBs are carefully constructed to avoid any bank conflicts while loading from shared
 // readAs = ((tid128 >> 4) | ((tid >> 1) & 7)) << 4;
@@ -139,22 +139,16 @@
 --:-:-:-:1      LOP.AND readBs, tid,    0x70;
 --:-:-:-:1      SHR.U32 readBs, readBs, 3;
 --:-:-:-:1      LOP.OR  readBs, readBs, tid1;
---:-:-:-:1      ISCADD  readBs, readBs, 4x<1024>, 4;
+--:-:-:-:1      ISCADD  readBs, readBs, 4x<8*128>, 4;
 
 // Preload the first 8 lines from texture memory
-// Break this up into two barriers so we can load 4 at a time along a single cache line.
 // Keep these instructions in this order (but allow others to interleave).
 // Normally the scheduler tries to preserve source order by default, but this demonstrates how you enforce
 // an ordering if you need to.
+// Note: these are the 4 element vector load versions (0xf)
 <ORDERED>
---:-:-:-:1      TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;
---:-:-:-:1      TLD.B.LZ.T loadX1, track1, tex, 0x0, 1D, 0x1;
---:-:-:-:1      TLD.B.LZ.T loadX2, track2, tex, 0x0, 1D, 0x1;
---:-:1:-:1      TLD.B.LZ.P loadX3, track3, tex, 0x0, 1D, 0x1; // Set Dep 1
---:-:-:-:1      TLD.B.LZ.T loadX4, track4, tex, 0x0, 1D, 0x1;
---:-:-:-:1      TLD.B.LZ.T loadX5, track5, tex, 0x0, 1D, 0x1;
---:-:-:-:1      TLD.B.LZ.T loadX6, track6, tex, 0x0, 1D, 0x1;
---:-:2:-:1      TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1; // Set Dep 2
+--:-:1:-:1      TLD.B.LZ.P loadX0, track0, tex, 0x0, 1D, 0xf; // Set Dep 1
+--:-:2:-:1      TLD.B.LZ.P loadX4, track4, tex, 0x0, 1D, 0xf; // Set Dep 2
 </ORDERED>
 
 </SCHEDULE_BLOCK>
@@ -163,27 +157,15 @@
 // that starts with a dependency barrier wait.
 <SCHEDULE_BLOCK>
 
-01:-:-:-:1      STS [writeS + 4x<000 + 00>], loadX0; // Wait Dep 1
---:-:-:-:1      STS [writeS + 4x<000 + 32>], loadX1;
---:-:-:-:1      STS [writeS + 4x<000 + 64>], loadX2;
---:-:-:-:1      STS [writeS + 4x<000 + 96>], loadX3;
-02:-:-:-:1      STS [writeS + 4x<512 + 00>], loadX4; // Wait Dep 2
---:-:-:-:1      STS [writeS + 4x<512 + 32>], loadX5;
---:-:-:-:1      STS [writeS + 4x<512 + 64>], loadX6;
---:-:-:-:1      STS [writeS + 4x<512 + 96>], loadX7;
+01:-:-:-:1      STS.128 [writeS + 4x<0*128>], loadX0; // Wait Dep 1
+02:-:-:-:1      STS.128 [writeS + 4x<4*128>], loadX4; // Wait Dep 2
 
 // Increment tracks after the loads are complete to avoid needing write-after-read dependencies
 --:-:-:-:1      IADD track0, track0, ldx8;
---:-:-:-:1      IADD track1, track1, ldx8;
---:-:-:-:1      IADD track2, track2, ldx8;
---:-:-:-:1      IADD track3, track3, ldx8;
 --:-:-:-:1      IADD track4, track4, ldx8;
---:-:-:-:1      IADD track5, track5, ldx8;
---:-:-:-:1      IADD track6, track6, ldx8;
---:-:-:-:1      IADD track7, track7, ldx8;
 
 // Wait for all threads to finish loading shared
---:-:-:-:5      BAR.SYNC 0x0;
+--:-:-:-:5      BAR.SYNC 0;
 
 </SCHEDULE_BLOCK>
 
@@ -191,14 +173,14 @@
 // Using LDS.U.128 is a neat trick to save a few clock cyles
 // (when you have enough warps to hide the latency.)
 <CODE>
-    return join '', map sprintf("--:-:-:-:1      LDS.U.128 cz%02d, [zOffset + 4x<2048>];\n", $_ * 4), 0..15;
+    return join '', map sprintf("--:-:-:-:1      LDS.U.128 cz%02d, [zOffset + 4x<16*128>];\n", $_ * 4), 0..15;
 </CODE>
 
 // The next store to shared goes to high area.
 // Having 2 share buffers allows us to eliminate a bar.sync in the main loop.
 // This way we don't have to wait for all threads to arrive before writing fresh data to shared.
 // Other threads can continue reading from the last batch while the new data is being written.
---:-:-:-:0      LOP.XOR writeS, writeS, 4x<2048>;
+--:-:-:-:0      LOP.XOR writeS, writeS, 4x<16*128>;
 
 // Preload the fist lines of A and B from shared
 --:-:-:-:1      LDS.U.128 j0Ax00, [readAs + 4x<0*128 + 00>];
@@ -215,14 +197,14 @@
 // Efficiency:
 // ffma: 512
 // lds:  32 dual issued
-// sts:  8  dual issued
-// tex:  8  dual issued
-// add:  8
+// sts:  2  dual issued
+// tex:  2  dual issued
+// add:  2
 // xor:  3
 // setp: 1
 // bar:  1  dual issued
 // bra:  1  dual issued
-// Total: 524 (512/524 = 97.7% FFMA)
+// Total: 524 (512/518 = 98.8% FFMA)
 
 LOOP:
 
@@ -233,45 +215,61 @@ LOOP:
 
     # We eliminated bank conflicts with our C registers and the blocking registers,
     # but there are still 16 bank conflicts between the blocking registers themselves.
-    # By ordering the FFMA's in a specific pattern we can completely hide those conflicts
-    # behind register reuse.  This pattern also maximizes that reuse and minimizes the bandwidth
+    # By ordering the FFMA's in a swirling zigzag pattern we can completely hide those conflicts
+    # behind register reuse.  This pattern also maximizes that reuse (47%) and minimizes the bandwidth
     # out of the register bank, thereby reducing power consumption and allowing the chip to
-    # stay at a higher sustained clock speed.
-    my @cOrder = qw(
-        x02y00 x00y00 x00y01 x02y01 x01y00 x03y00 x01y01 x03y01
-        x64y00 x66y00 x64y01 x66y01 x65y00 x67y00 x65y01 x67y01
-        x65y02 x67y02 x65y03 x67y03 x64y02 x66y02 x64y03 x66y03
-        x01y02 x03y02 x01y03 x03y03 x00y02 x02y02 x00y03 x02y03
-        x00y64 x02y64 x00y65 x02y65 x01y64 x03y64 x01y65 x03y65
-        x64y64 x66y64 x64y65 x66y65 x65y64 x67y64 x65y65 x67y65
-        x65y66 x67y66 x65y67 x67y67 x64y66 x66y66 x64y67 x66y67
-        x01y66 x03y66 x01y67 x03y67 x00y66 x02y66 x00y67 x02y67
-    );
+    # stay at a higher sustained clock speed.  One other constraint is that we want each successive
+    # instruction to pull its third operand from alternating banks.  We space the swirl by 2 in the x
+    # direction to achieve this.  This has the effect of making it easier to avoid delayed bank conflicts
+    # with the memory operations.  Finally, for the very first ffma, don't choose one of the 16 bank conflicts
+    # as we have no way of hiding that conflict behind a reuse (cublas makes this mistake).
+
+    # Alternating banks (1320 Hz, full speed)
+    my @swirl = ([2,0],[2,1],[0,1],[0,0]);
+    my @xVals = (0,1,64,65);
+
+    # Repeating banks (1320Hz, 83 Gflops slower, but lower power draw probably becuase of increased stalls)
+    # Only explanation I can think of is increased delayed register bank conflicts with memory ops.
+    #my @swirl = ([0,1],[0,0],[1,0],[1,1]);
+    #my @xVals = (0,2,64,66);
+
+    my @cOrder;
+    foreach my $y (0,2,64,66)
+    {
+        # apply the swirl
+        foreach my $x (@xVals)
+        {
+            push @cOrder, sprintf('x%02dy%02d', $x + $_->[0], $y + $_->[1]) foreach @swirl;
+        }
+        # apply the zigzag
+        @xVals = reverse @xVals;
+    }
+
+    # This ordering (a simple zigzag) eliminates the bank conflicts but only achieves 39% reuse.
+    # It runs 20 GFlops slower since the register bank draws more power and the clock slows down to 1306 Hz.
+    # There may be more delayed bank conflicts with memory operations as the slowdown is 4 Glops more than
+    # the reduced clock accounts for.
+    #my @cOrder2;
+    #my @xVals = (0..3,64..67);
+    #foreach my $y (0..3,64..67)
+    #{
+    #    @xVals = reverse @xVals;
+    #    push @cOrder2, sprintf('x%02dy%02d',$_,$y) foreach @xVals;
+    #}
+    #@cOrder = @cOrder2;
 
     my %insert =
     (
         # Don't start the first TLD before 12 to let ISETP to write P0
         # These global reads and shared writes we put exactly in the middle of the LDS ops
         # This is to not overwhelm the memory units with instructions (and because these were tested faster here).
-        j0c29 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX0, track0, tex, 0x0, 1D, 0x1;\n",
-        j0c31 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX1, track1, tex, 0x0, 1D, 0x1;\n",
-        j0c33 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX2, track2, tex, 0x0, 1D, 0x1;\n",
-        j0c35 => "--:-:2:-:1  \@P0 TLD.B.LZ.P loadX3, track3, tex, 0x0, 1D, 0x1; // Set Dep 2\n",
+        # The 4 spacing seems to work best for vec4 instructions.
 
-        j1c29 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX4, track4, tex, 0x0, 1D, 0x1;\n",
-        j1c31 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX5, track5, tex, 0x0, 1D, 0x1;\n",
-        j1c33 => "--:-:-:-:1  \@P0 TLD.B.LZ.T loadX6, track6, tex, 0x0, 1D, 0x1;\n",
-        j1c35 => "--:-:3:-:1  \@P0 TLD.B.LZ.P loadX7, track7, tex, 0x0, 1D, 0x1; // Set Dep 3\n",
+        j0c30 => "--:-:2:-:1  \@P0 TLD.B.LZ.P loadX0, track0, tex, 0x0, 1D, 0xf; // Set Dep 2\n",
+        j0c34 => "--:-:3:-:1  \@P0 TLD.B.LZ.P loadX4, track4, tex, 0x0, 1D, 0xf; // Set Dep 3\n",
 
-        j5c29 => "02:-:-:-:1  \@P0 STS [writeS + 4x<000 + 00>], loadX0;       // Wait Dep 2\n",
-        j5c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 32>], loadX1;\n",
-        j5c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 64>], loadX2;\n",
-        j5c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<000 + 96>], loadX3;\n",
-
-        j6c29 => "04:-:-:-:1  \@P0 STS [writeS + 4x<512 + 00>], loadX4;       // Wait Dep 3\n",
-        j6c31 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 32>], loadX5;\n",
-        j6c33 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 64>], loadX6;\n",
-        j6c35 => "--:-:-:-:1  \@P0 STS [writeS + 4x<512 + 96>], loadX7;\n",
+        j6c30 => "02:-:-:-:1  \@P0 STS.128 [writeS + 4x<0*128>], loadX0; // Wait Dep 2\n",
+        j6c34 => "04:-:-:-:1  \@P0 STS.128 [writeS + 4x<4*128>], loadX4; // Wait Dep 3\n",
 
         # We need one barrier in the main loop after writing shared memory.
         # Note, BAR.SYNCs do not sync memory read access automatically, you still need to flag the barriers (writes are sync'd).
@@ -279,33 +277,27 @@ LOOP:
         # Note, this doubles our shared memory usage but this kernel's occupancy is entirely bound by registers.
         # LOP.XOR readAs needs to be 4 clocks prior to the LDS.U.128 for readAs (but push this as far down as possible)
         j6c62 =>
-                "01:-:-:-:5  \@P0 BAR.SYNC 0x0; // Wait Dep 1\n" .
-                "--:-:-:-:1  \@P0 LOP.XOR readAs, readAs, 4x<2048>;\n" .
-                "--:-:-:-:1  \@P0 LOP.XOR readBs, readBs, 4x<2048>;\n" .
-                "--:-:-:-:1  \@P0 LOP.XOR writeS, writeS, 4x<2048>;\n",
+                "01:-:-:-:5  \@P0 BAR.SYNC 0;                            // Wait Dep 1\n" .
+                "--:-:-:-:1  \@P0 LOP.XOR readAs, readAs, 4x<16*128>;\n" .
+                "--:-:-:-:1  \@P0 LOP.XOR readBs, readBs, 4x<16*128>;\n" .
+                "--:-:-:-:1  \@P0 LOP.XOR writeS, writeS, 4x<16*128>;\n",
 
-        # Note having 8 IADDs slightly hits our FFMA performance (8/520 = 1.5%), but TLD doesn't take an offset.
+        # Note having 2 IADDs slightly hits our FFMA performance (1/518 = .2%), but TLD doesn't take an offset.
         # LDG.CI doesn't have this issue, but doesn't give you the nice features of texture loads:
         #   -Boundry Clamping:  simplifies our matrix load logic so we don't need to worry about loading out of bounds
         #   -Normalized Floats: if we don't need full 32 bits of precision we could store our matrices using 16 or 8 bit values
         j7c63 =>
                 "--:-:-:-:1  \@P0 IADD track0, track0, ldx8;\n" .
-                "--:-:-:-:1  \@P0 IADD track1, track1, ldx8;\n" .
-                "--:-:-:-:1  \@P0 IADD track2, track2, ldx8;\n" .
-                "--:-:-:-:1  \@P0 IADD track3, track3, ldx8;\n" .
-                "--:-:-:-:1  \@P0 IADD track4, track4, ldx8;\n" .
-                "--:-:-:-:1  \@P0 IADD track5, track5, ldx8;\n" .
-                "--:-:-:-:1  \@P0 IADD track6, track6, ldx8;\n" .
-                "--:-:-:-:0  \@P0 IADD track7, track7, ldx8;\n" .
+                "--:-:-:-:0  \@P0 IADD track4, track4, ldx8;\n" .
                 "--:-:-:Y:5  \@P0 BRA LOOP;\n",
     );
 
     my $out;
-    # We unroll our main loop 8 iterations
-    # This gives ample time for our textures to load.
-    # We could unroll further but that increases the size of the program and increase instruction fetch latency on the branches.
-    # We'd also need more shared memory to buffer the lines and more registers to store texture loads.
-    # With metaprogramming you could parameterize all this and autotune this implementation for your matrix sizes.
+    # We unroll our main loop 8 iterations.
+    # This gives us a loop instruction count of 556.  Add the control instructions and that makes it 741 opcodes sized 8 bytes.
+    # This is 5928 bytes, nicely fitting inside the 8kb instruction cache.  Going to the next biggest size would be 12 lines.
+    # That would be 768 ffmas and not leaving enough room for the other instructions and control codes.
+    # So by staying inside the instruction cache size, we avoid hitting any instruction fetch latencies.
     foreach my $j (0 .. 7)
     {
         my $odd      = $j & 1;
@@ -321,6 +313,7 @@ LOOP:
         if ($vec == 128)
         {
             # Roll up our LDS ops here to keep them easier to manage and tune
+            # Space at every other clock to maximize throughput.
             $insert{"j${j}c0"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c2"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c4"} = sprintf "--:-:-:-:1  %s LDS.U.128 j%dAx64, [readAs + 4x<%d*128 + 64>];\n", $rsPred, $nOdd, $rsOffset;
@@ -328,9 +321,10 @@ LOOP:
         }
         elsif ($vec == 64)
         {
-            # LDS.128 runs about 40 Gflops faster than LDS.64 (GM107).  Not a huge difference since our latencies are so well hidden.
+            # LDS.128 runs about 22 Gflops faster than LDS.64 (GM107).  Not a huge difference since our latencies are so well hidden.
             # I think LDS.128 is implemented internally as a pair of LDS.64 ops which could be another reason for the comparable performance.
             # I think the big benefit with 128 is being able to issue all our LDS ops earlier, allowing more FFMA's prior to reading out the results.
+            # There could be additional opportunity for delayed bank conflicts.
             $insert{"j${j}c0"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c2"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx02, [readAs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c4"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
@@ -342,7 +336,8 @@ LOOP:
         }
         else
         {
-            # This one drops performance by about 200 Gflops.  So you want to at least use LDS.64 if you can.
+            # This one drops performance by over 200 Gflops.  So you want to at least use LDS.64 if you can.
+            # We don't even have room to properly space these at half throuput.
             $insert{"j${j}c0"}  = sprintf "--:-:-:-:1  %s LDS j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c1"}  = sprintf "--:-:-:-:1  %s LDS j%dAx01, [readAs + 4x<%d*128 + 01>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c2"}  = sprintf "--:-:-:-:1  %s LDS j%dAx02, [readAs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
@@ -369,7 +364,7 @@ LOOP:
 
             # Scatter some yields in there to better balance the workload and reduce sync stalls
             # Don't pair a yeild with the dual issued ffmas as that kills performance for some reason
-            my $yield  = $c == 28 ? 'Y' : '-';
+            my $yield  = $c == 32 ? 'Y' : '-';
 
             # The first FFMA needs to wait on the prior loop's LDS.U.128 ops to finish (except if the barrier does the wait for us)
             my ($waitDB, $comment) = $c == 0 && $j < 7 ? ('01', ' // Wait Dep 1') : ('--','');
@@ -390,11 +385,9 @@ LOOP:
 // Main loop is done, time to write C to global memory.
 <SCHEDULE_BLOCK>
 
---:-:-:-:1      MOV ldc, c[0x0][0x158];
---:-:-:-:1      MOV m,   c[0x0][0x144];
---:-:-:-:1      MOV n,   c[0x0][0x148];
-
-// Remove the high bits if present from the last loop's xor
+// Remove the high bits if present from the last loop's xor.
+// Also remove the 4096 added onto readBs.
+// This gives us the x and y coordinates of the start of this thread's data in C.
 --:-:-:-:1      LOP.AND readAs, readAs, 0xfff;
 --:-:-:-:1      LOP.AND readBs, readBs, 0xfff;
 
@@ -404,7 +397,7 @@ LOOP:
 --:-:-:-:1      ISCADD  writeCs, readBs, readAs, 5;
 
 // Read out the C values from shared in a simple tid mapped pattern but
-// offset by the position of this warp's data in shared.
+// offset by the position of this warp's colapsed data in shared.
 
 // cx = tid31 | (tid128 >> 2);
 --:-:-:-:1      SHR.U32  cx, tid128, 2;
@@ -423,26 +416,36 @@ LOOP:
 --:-:-:-:1      ISCADD  cy00, by, cy00, 7;
 
 // C += (cy*ldc + cx) * 4;
---:-:-:-:1      XMAD.LO ci, cy00, ldc, cx, xmad2;
+--:-:-:-:1      MOV ldc, c[0x0][0x158];
+--:-:-:-:1      XMAD.LO ci, cy00, ldc, cx, xmad_ci;
 --:-:-:-:1      ISCADD  Cy00, ci, c[0x0][0x140], 2;
 
 // When writing in assembly, being able to 'printf' is sometimes easier than stepping through the debugger.
 // Here's how it's done.  Drop something like this in your code (math assumes 256 threads and 1 block).
 // Then modify the c code to accept this many params per thread to printf (see assemblySgemm function).
-//--:-:-:-:1      ISCADD D, tid, c[0x0][0x15c], 0x2;
-//--:-:-:-:1      STG.CS [D + 4x<0 * 256>], readAs;
-//--:-:-:-:1      STG.CS [D + 4x<1 * 256>], readBs;
-//--:-:-:-:1      STG.CS [D + 4x<2 * 256>], writeCs;
-//--:-:-:-:1      STG.CS [D + 4x<3 * 256>], readCs;
-//--:-:-:-:1      STG.CS [D + 4x<4 * 256>], cx;
-//--:-:-:-:1      STG.CS [D + 4x<5 * 256>], cy00;
-//--:-:-:-:1      STG.CS [D + 4x<6 * 256>], ci;
-//--:-:-:-:1      STG.CS [D + 4x<7 * 256>], cx67y67;
+
+// D += ((by * gridDimX * blockDimX * vars) + (bx * blockDimX * vars) + (tid * vars)) * 4
+// D += ((by * gridDimX + bx) * blockDimX + tid) * vars * 4
+//--:-:-:-:1      MOV gridDimX, c[0x0][0x14];
+//--:-:-:-:1      MOV blckDimX, c[0x0][0x8];
+//--:-:-:-:1      XMAD.LO D, by, gridDimX, bx, xmad_D;
+//--:-:-:-:1      XMAD.LO D, D, blckDimX, tid, xmad_D;
+//--:-:-:-:1      ISCADD D, D, c[0x0][0x160], 5; // 4 bytes * 8 vars = 32 or shift 5
+
+//--:-:-:-:1      STG.CS [D + 4x<0>], readAs;
+//--:-:-:-:1      STG.CS [D + 4x<1>], readBs;
+//--:-:-:-:1      STG.CS [D + 4x<2>], writeCs;
+//--:-:-:-:1      STG.CS [D + 4x<3>], readCs;
+//--:-:-:-:1      STG.CS [D + 4x<4>], cx;
+//--:-:-:-:1      STG.CS [D + 4x<5>], cy00;
+//--:-:-:-:1      STG.CS [D + 4x<6>], ci;
+//--:-:-:-:1      STG.CS [D + 4x<7>], cx35y35;
 
 // Setup our matrix bounds checking vars and preds
---:-:-:-:1      ISETP.LT.AND P5, PT, cx, m, PT;
+// Bounds checking is what allows this code to work on matrix sizes not a multiple of 128
+--:-:-:-:1      ISETP.LT.AND P5, PT, cx, c[0x0][0x144], PT; // cx +  0 < m
 --:-:-:-:1      IADD cx, cx, 64;
---:-:-:-:1      ISETP.LT.AND P6, PT, cx, m, PT;
+--:-:-:-:1      ISETP.LT.AND P6, PT, cx, c[0x0][0x144], PT; // cx + 64 < m
 
 --:-:-:-:1      IADD cy00, cy00, -1;
 --:-:-:-:1      IADD cy04, cy00,  4;
@@ -455,6 +458,19 @@ LOOP:
 --:-:-:-:1      SHL  ldc8,  ldc, 5;
 --:-:-:-:1      ISCADD ldc60, ldc, -ldc4, 8;
 
+// Load the first set of the STORE_C subroutine params in the scheduled block.
+# This is also a good time to apply alpha.
+--:-:-:-:1      MOV alpha, c[0x0][0x15c];
+
+--:-:-:-:1      FMUL cs0, cx00y00, alpha;
+--:-:-:-:1      FMUL cs1, cx01y00, alpha;
+--:-:-:-:1      FMUL cs2, cx02y00, alpha;
+--:-:-:-:1      FMUL cs3, cx03y00, alpha;
+--:-:-:-:1      FMUL cs4, cx64y00, alpha;
+--:-:-:-:1      FMUL cs5, cx65y00, alpha;
+--:-:-:-:1      FMUL cs6, cx66y00, alpha;
+--:-:-:-:1      FMUL cs7, cx67y00, alpha;
+
 // We pre-increment the output addresses so they can be dual issued with memory ops
 // So start with a -1 instead of 0 value.
 --:-:-:-:1      IADD Cy00, Cy00, -ldc1;
@@ -462,15 +478,8 @@ LOOP:
 --:-:-:-:1      IADD Cy08, Cy00, ldc8;
 --:-:-:-:0      IADD Cy12, Cy04, ldc8; // Dual Issue (last instruction after reordering)
 
-// Load the first set of the STORE_C subroutine params in the scheduled block.
---:-:-:-:1      MOV cs0, cx00y00;
---:-:-:-:1      MOV cs1, cx01y00;
---:-:-:-:1      MOV cs2, cx02y00;
---:-:-:-:1      MOV cs3, cx03y00;
---:-:-:-:1      MOV cs4, cx64y00;
---:-:-:-:1      MOV cs5, cx65y00;
---:-:-:-:1      MOV cs6, cx66y00;
---:-:-:-:1      MOV cs7, cx67y00;
+
+
 
 </SCHEDULE_BLOCK>
 
@@ -496,16 +505,16 @@ LOOP:
             "--:-:-:-:1      IADD Cy12, Cy12, ldc60;\n\n"  if $y == 64;
 
         # We need to move the C values to the param registers of the STORE_C subroutine.
-        # Note that these could be FMUL's instead of MOV's if we wanted to multiply the output by alpha.
+        # This is also a good time to apply alpha.
         $out .= sprintf(
-            "%s:-:-:-:1      MOV cs0, cx00y%02d;%s\n" .
-            "--:-:-:-:1      MOV cs1, cx01y%02d;\n" .
-            "--:-:-:-:1      MOV cs2, cx02y%02d;\n" .
-            "--:-:-:-:1      MOV cs3, cx03y%02d;\n" .
-            "--:-:-:-:1      MOV cs4, cx64y%02d;\n" .
-            "--:-:-:-:1      MOV cs5, cx65y%02d;\n" .
-            "--:-:-:-:1      MOV cs6, cx66y%02d;\n" .
-            "--:-:-:-:0      MOV cs7, cx67y%02d; // Dual Issue\n",
+            "%s:-:-:-:1      FMUL cs0, cx00y%02d, alpha;%s\n" .
+            "--:-:-:-:1      FMUL cs1, cx01y%02d, alpha;\n" .
+            "--:-:-:-:1      FMUL cs2, cx02y%02d, alpha;\n" .
+            "--:-:-:-:1      FMUL cs3, cx03y%02d, alpha;\n" .
+            "--:-:-:-:1      FMUL cs4, cx64y%02d, alpha;\n" .
+            "--:-:-:-:1      FMUL cs5, cx65y%02d, alpha;\n" .
+            "--:-:-:-:1      FMUL cs6, cx66y%02d, alpha;\n" .
+            "--:-:-:-:0      FMUL cs7, cx67y%02d, alpha; // Dual Issue\n",
             $wait, $y, $comment, ($y) x 7) if $y;
 
         # Call the subroutine.
@@ -558,20 +567,20 @@ STORE_C:
 --:-:-:-:1      IADD Cy08, Cy08, ldc1;
 --:-:-:-:1      IADD Cy12, Cy12, ldc1;
 
---:-:-:-:1      ISETP.LT.AND P0, PT, cy00, n, P5;
---:-:-:-:1      ISETP.LT.AND P1, PT, cy00, n, P6;
---:-:-:-:1      ISETP.LT.AND P2, PT, cy04, n, P5;
---:-:-:-:1      ISETP.LT.AND P3, PT, cy04, n, P6;
+--:-:-:-:1      ISETP.LT.AND P0, PT, cy00, c[0x0][0x148], P5; // cy00 < n && cx +  0 < m
+--:-:-:-:1      ISETP.LT.AND P1, PT, cy00, c[0x0][0x148], P6; // cy00 < n && cx + 64 < m
+--:-:-:-:1      ISETP.LT.AND P2, PT, cy04, c[0x0][0x148], P5; // cy04 < n && cx +  0 < m
+--:-:-:-:1      ISETP.LT.AND P3, PT, cy04, c[0x0][0x148], P6; // cy04 < n && cx + 64 < m
 
 01:-:-:-:1  @P0 STG.CG [Cy00 + 4x<00>], cs0; // Wait Dep 1
 --:-:-:-:1  @P1 STG.CG [Cy00 + 4x<64>], cs1;
 --:-:-:-:1  @P2 STG.CG [Cy04 + 4x<00>], cs2;
 --:-:-:-:1  @P3 STG.CG [Cy04 + 4x<64>], cs3;
 
---:-:-:-:1      ISETP.LT.AND P0, PT, cy08, n, P5;
---:-:-:-:1      ISETP.LT.AND P1, PT, cy08, n, P6;
---:-:-:-:1      ISETP.LT.AND P2, PT, cy12, n, P5;
---:-:-:-:1      ISETP.LT.AND P3, PT, cy12, n, P6;
+--:-:-:-:1      ISETP.LT.AND P0, PT, cy08, c[0x0][0x148], P5; // cy08 < n && cx +  0 < m
+--:-:-:-:1      ISETP.LT.AND P1, PT, cy08, c[0x0][0x148], P6; // cy08 < n && cx + 64 < m
+--:-:-:-:1      ISETP.LT.AND P2, PT, cy12, c[0x0][0x148], P5; // cy12 < n && cx +  0 < m
+--:-:-:-:1      ISETP.LT.AND P3, PT, cy12, c[0x0][0x148], P6; // cy12 < n && cx + 64 < m
 
 --:-:-:-:1  @P0 STG.CG [Cy08 + 4x<00>], cs4;
 --:-:-:-:1  @P1 STG.CG [Cy08 + 4x<64>], cs5;

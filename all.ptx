@@ -4,8 +4,11 @@
 // Cuda compilation tools, release 6.5, V6.5.10
 //
 
+//ptxas -v -arch=sm_52 -m 32 --opt-level 4 -o all.cubin all.ptx
+//cuobjdump -sass all.cubin > all.txt
+
 .version 4.1
-.target sm_50
+.target sm_52
 .address_size 32
 
 

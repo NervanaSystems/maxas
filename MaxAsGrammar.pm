@@ -1,11 +1,16 @@
 package MaxAsGrammar;
 
 use strict;
+use Carp;
 use Exporter;
 use Data::Dumper;
 our @ISA = qw(Exporter);
 
-our @EXPORT = qw(%grammar %flags genCode genReuseCode);
+our @EXPORT = qw(
+    %grammar %flags genCode genReuseCode
+    processAsmLine processSassLine processSassCtrlLine
+    replaceXMADs printCtrl readCtrl getVecRegisters
+);
 
 require 5.10.0;
 
@@ -101,6 +106,7 @@ my %operands =
     r8      => sub { getR($_[0], 8)  },
     r20     => sub { getR($_[0], 20) },
     r39     => sub { getR($_[0], 39) },
+    r39a    => sub { 0;              }, # does not modify op code, register must be in sequence with r20
     c20     => sub { getC($_[0])     },
     c39     => sub { getC($_[0])     },
     c34     => sub { hex($_[0]) << 34 },
@@ -114,6 +120,7 @@ my %operands =
     i20w12  => sub { getI($_[0], 20, 0xfff)      },
     i20w24  => sub { getI($_[0], 20, 0xffffff)   },
     i20w32  => sub { getI($_[0], 20, 0xffffffff) },
+    i31w4   => sub { getI($_[0], 31, 0xf)        },
     i34w13  => sub { getI($_[0], 34, 0x1fff)     },
     i36w20  => sub { getI($_[0], 36, 0xfffff)    },
     i39w8   => sub { getI($_[0], 39, 0xff)       },
@@ -146,6 +153,7 @@ my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1))?
 my $r20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r20>$reg)\|?(?:\.(?<r20part>H0|H1|B1|B2|B3))?(?<reuse2>\.reuse)?";
 my $r39s20  = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r39>$reg)\|?(?:\.(?<r39part>H0|H1))?(?<reuse2>\.reuse)?";
 my $r39     = qr"(?<r39neg>\-)?(?<r39>$reg)(?:\.(?<r39part>H0|H1))?(?<reuse3>\.reuse)?";
+my $r39a    = qr"(?<r39a>$reg)(?<reuse3>\.reuse)?";
 my $c20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?c\[(?<c34>$hex)\]\s*\[(?<c20>$hex)\]\|?"o;
 my $c20s39  = qr"(?<r39neg>\-)?c\[(?<c34>$hex)\]\s*\[(?<c39>$hex)\]"o;
 my $f20w32  = qr"(?<f20w32>(?:\-|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))";
@@ -160,6 +168,7 @@ my $i20w32  = qr"(?<i20w32>\-?$immed)"o;
 my $i39w8   = qr"(?<i39w8>\-?$immed)"o;
 my $i28w8   = qr"(?<i28w8>$immed)"o;
 my $i28w20  = qr"(?<i28w20>\-?$immed)"o;
+my $i31w4   = qr"(?<i31w4>$immed)"o;
 my $i34w13  = qr"(?<i34w13>$immed)"o;
 my $i36w20  = qr"(?<i36w20>$immed)"o;
 my $i48w8   = qr"(?<i48w8>$immed)"o;
@@ -202,7 +211,7 @@ my $iAddr = qr"";
 my $addr  = qr"\[(?:(?<r8>$reg)|(?<nor8>))(?:\s*\+?\s*$i20w24)?\]"o;
 my $addr2 = qr"\[(?:(?<r8>$reg)|(?<nor8>))(?:\s*\+?\s*$i28w20)?\]"o;
 my $ldc   = qr"c\[(?<c36>$hex)\]\s*$addr"o;
-my $atom  = qr"(?:\.(?<mode>ADD|MIN|MAX|INC|DEC|AND|OR|XOR|EXCH|CAS))(?<type>|\.S32|\.U64|\.F32\.FTZ\.RN|\.S64|\.64)";
+my $atom  = qr"(?<E>\.E)?(?:\.(?<mode>ADD|MIN|MAX|INC|DEC|AND|OR|XOR|EXCH|CAS))(?<type>|\.S32|\.U64|\.F(?:16x2|16x4|32)\.FTZ\.RN|\.S64|\.64)";
 my $vote  = qr"\.(?<mode>ALL|ANY|EQ)"o;
 my $memType  = qr"(?<type>\.U8|\.S8|\.U16|\.S16||\.32|\.64|\.128)";
 my $memCache = qr"(?<E>\.E)?(?<U>\.U)?(?:\.(?<cache>CG|CI|CS|CV|IL|WT))?";
@@ -253,7 +262,7 @@ our %grammar =
     DMUL     => [ { type => $x64T,  code => 0x5c80000000000000, rule => qr"^$pred?DMUL$rnd $r0, $r8, $dr20;"o,                        } ],
     DSET     => [ { type => $cmpT,  code => 0x5900000000000000, rule => qr"^$pred?DSET$fcmp$bool $r0, $r8, $dr20, $p39;"o,            } ],
     DSETP    => [ { type => $cmpT,  code => 0x5b80000000000000, rule => qr"^$pred?DSETP$fcmp$bool $p3, $p0, $r8, $dr20, $p39;"o,      } ],
-    FSWZADD  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?FSWZADD.*?;"o,                                      } ], #TODO
+    FSWZADD  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?FSWZADD[^;]*;"o,                                    } ], #TODO
 
     #Integer Instructions
     BFE       => [ { type => $shftT,  code => 0x5c00000000000000, rule => qr"^$pred?BFE\.U32 $r0, $r8, $icr20;"o,                         } ],
@@ -287,15 +296,15 @@ our %grammar =
                  ],
     SHL       => [ { type => $shftT,  code => 0x5c48000000000000, rule => qr"^$pred?SHL $r0, $r8, $icr20;"o,                              } ],
     SHR       => [ { type => $shftT,  code => 0x5c29000000000000, rule => qr"^$pred?SHR$u32 $r0, $r8, $icr20;"o,                          } ],
-    # x32T is probably the main type for XMAD, but I did find an edge case where an XMAD mixed with a SHL was causing bugs... so being conservative till I can further investigate.
+    # x32T is probably the main type for XMAD, but this needs thorough investigation..
     XMAD      => [
                    { type => $x32T,   code => 0x5b00000000000000, rule => qr"^$pred?XMAD$xmad $r0cc, $r8, $ir20, $r39;"o,                 },
                    { type => $x32T,   code => 0x5900000000000000, rule => qr"^$pred?XMAD$xmad $r0cc, $r8, $r39s20, $c20s39;"o,            },
                  ],
     # I think XMAD largely replaces these
-    IMAD      => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMAD.*?;"o,   } ], #TODO
-    IMADSP    => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMADSP.*?;"o, } ], #TODO
-    IMUL      => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMUL.*?;"o,   } ], #TODO
+    IMAD      => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMAD[^;]*;"o,   } ], #TODO
+    IMADSP    => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMADSP[^;]*;"o, } ], #TODO
+    IMUL      => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMUL[^;]*;"o,   } ], #TODO
 
     #Conversion Instructions
     F2F => [ { type => $qtrT,  code => 0x5ca8000000000000, rule => qr"^$pred?F2F$ftz$x2x$rnd$round$sat $r0, $cr20;"o, } ],
@@ -313,20 +322,20 @@ our %grammar =
     #Predicate/CC Instructions
     PSET   => [ { type => $cmpT,  code => 0x5088000000000000, rule => qr"^$pred?PSET$bool2$bool $r0, $p12, $p29, $p39;"o,       } ],
     PSETP  => [ { type => $cmpT,  code => 0x5090000000000000, rule => qr"^$pred?PSETP$bool2$bool $p3, $p0, $p12, $p29, $p39;"o, } ],
-    CSET   => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSET.*?;"o,  } ], #TODO
-    CSETP  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSETP.*?;"o, } ], #TODO
-    P2R    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?P2R.*?;"o,   } ], #TODO
-    R2P    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?R2P.*?;"o,   } ], #TODO
+    CSET   => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSET[^;]*;"o,  } ], #TODO
+    CSETP  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSETP[^;]*;"o, } ], #TODO
+    P2R    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?P2R[^;]*;"o,   } ], #TODO
+    R2P    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?R2P[^;]*;"o,   } ], #TODO
 
     #Texture Instructions
     # Handle the commonly used 1D texture functions.. but save the others for later
-    TLD    => [ { type => $gmemT, code => 0xdd38000080000000, rule => qr"^$pred?TLD\.B\.LZ\.$tld $r0, $r8, $r20, 0x0, 1D, 0x1;"o, } ], #Partial
-    TLDS   => [ { type => $gmemT, code => 0xda00000ffff00000, rule => qr"^$pred?TLDS\.LZ\.$tld RZ, $r0, $r8, $i36w20, 1D, R;"o,   } ], #Partial
-    TEX    => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TEX.*?;"o,   } ], #TODO
-    TLD4   => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TLD4.*?;"o,  } ], #TODO
-    TXQ    => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TXQ.*?;"o,   } ], #TODO
-    TEXS   => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TEXS.*?;"o,  } ], #TODO
-    TLD4S  => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TLD4S.*?;"o, } ], #TODO
+    TLD    => [ { type => $gmemT, code => 0xdd38000000000000, rule => qr"^$pred?TLD\.B\.LZ\.$tld $r0, $r8, $r20, $hex, \dD, $i31w4;"o, } ], #Partial
+    TLDS   => [ { type => $gmemT, code => 0xda00000ffff00000, rule => qr"^$pred?TLDS\.LZ\.$tld RZ, $r0, $r8, $i36w20, \dD, R;"o,       } ], #Partial
+    TEX    => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TEX[^;]*;"o,   } ], #TODO
+    TLD4   => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TLD4[^;]*;"o,  } ], #TODO
+    TXQ    => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TXQ[^;]*;"o,   } ], #TODO
+    TEXS   => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TEXS[^;]*;"o,  } ], #TODO
+    TLD4S  => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TLD4S[^;]*;"o, } ], #TODO
 
     #Compute Load/Store Instructions
     LD     => [ { type => $gmemT, code => 0x8000000000000000, rule => qr"^$pred?LD$memCache$memType $r0, $addr, $p58;"o,      } ],
@@ -339,39 +348,39 @@ our %grammar =
     STL    => [ { type => $gmemT, code => 0xef50000000000000, rule => qr"^$pred?STL$memCache$memType $addr, $r0;"o,           } ],
     LDC    => [ { type => $gmemT, code => 0xef90000000000000, rule => qr"^$pred?LDC$memCache$memType $r0, $ldc;"o,            } ],
     # Note for ATOM(S).CAS operations the last register needs to be in sequence with the second to last (as it's not encoded).
-    ATOM   => [ { type => $gmemT, code => 0xed00000000000000, rule => qr"^$pred?ATOM$atom $r0, $addr2, $r20(?:, R\d+)?;"o,    } ],
-    ATOMS  => [ { type => $smemT, code => 0xec00000000000000, rule => qr"^$pred?ATOMS$atom $r0, $addr2, $r20(?:, R\d+)?;"o,   } ],
+    ATOM   => [ { type => $gmemT, code => 0xed00000000000000, rule => qr"^$pred?ATOM$atom $r0, $addr2, $r20(?:, $r39a)?;"o,   } ],
+    ATOMS  => [ { type => $smemT, code => 0xec00000000000000, rule => qr"^$pred?ATOMS$atom $r0, $addr2, $r20(?:, $r39a)?;"o,  } ],
     RED    => [ { type => $gmemT, code => 0xebf8000000000000, rule => qr"^$pred?RED$atom $addr2, $r0;"o,                      } ],
-    CCTL   => [ { type => $x32T,  code => 0x5c88000000000000, rule => qr"^$pred?CCTL.*?;"o,  } ], #TODO
-    CCTLL  => [ { type => $x32T,  code => 0x5c88000000000000, rule => qr"^$pred?CCTLL.*?;"o, } ], #TODO
-    CCTLT  => [ { type => $x32T,  code => 0x5c88000000000000, rule => qr"^$pred?CCTLT.*?;"o, } ], #TODO
+    CCTL   => [ { type => $x32T,  code => 0x5c88000000000000, rule => qr"^$pred?CCTL[^;]*;"o,  } ], #TODO
+    CCTLL  => [ { type => $x32T,  code => 0x5c88000000000000, rule => qr"^$pred?CCTLL[^;]*;"o, } ], #TODO
+    CCTLT  => [ { type => $x32T,  code => 0x5c88000000000000, rule => qr"^$pred?CCTLT[^;]*;"o, } ], #TODO
 
     #Surface Memory Instructions (haven't gotten to these yet..)
-    SUATOM => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?SUATOM.*?;"o, } ], #TODO
-    SULD   => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?SULD.*?;"o,   } ], #TODO
-    SURED  => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?SURED.*?;"o,  } ], #TODO
-    SUST   => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?SUST.*?;"o,   } ], #TODO
+    SUATOM => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?SUATOM[^;]*;"o, } ], #TODO
+    SULD   => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?SULD[^;]*;"o,   } ], #TODO
+    SURED  => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?SURED[^;]*;"o,  } ], #TODO
+    SUST   => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?SUST[^;]*;"o,   } ], #TODO
 
     #Control Instructions
     BRA    => [
                 { type => $x32T, code => 0xe24000000000000f, rule => qr"^$pred?BRA(?<U>\.U)? $i20w24;"o,         },
                 { type => $x32T, code => 0xe240000000000002, rule => qr"^$pred?BRA(?<U>\.U)? CC\.EQ, $i20w24;"o, },
               ],
-    BRX    => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?BRX.*?;"o,                        } ], #TODO
-    JMP    => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?JMP.*?;"o,                        } ], #TODO
-    JMX    => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?JMX.*?;"o,                        } ], #TODO
+    BRX    => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?BRX[^;]*;"o,                      } ], #TODO
+    JMP    => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?JMP[^;]*;"o,                      } ], #TODO
+    JMX    => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?JMX[^;]*;"o,                      } ], #TODO
     SSY    => [ { type => $x32T, code => 0xe290000000000000, rule => qr"^$noPred?SSY $i20w24;"o,                 } ],
     SYNC   => [ { type => $x32T, code => 0xf0f800000000000f, rule => qr"^$pred?SYNC;"o,                          } ],
     CAL    => [ { type => $x32T, code => 0xe260000000000040, rule => qr"^$noPred?CAL $i20w24;"o,                 } ],
     JCAL   => [ { type => $x32T, code => 0xe220000000000040, rule => qr"^$noPred?JCAL $i20w24;"o,                } ],
-    PRET   => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?PRET.*?;"o,                       } ], #TODO
+    PRET   => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?PRET[^;]*;"o,                     } ], #TODO
     RET    => [ { type => $x32T, code => 0xe32000000000000f, rule => qr"^$pred?RET;"o,                           } ],
     BRK    => [ { type => $x32T, code => 0xe34000000000000f, rule => qr"^$pred?BRK;"o,                           } ],
     PBK    => [ { type => $x32T, code => 0xe2a0000000000000, rule => qr"^$noPred?PBK $i20w24;"o,                 } ],
     CONT   => [ { type => $x32T, code => 0xe35000000000000f, rule => qr"^$pred?CONT;"o,                          } ],
     PCNT   => [ { type => $x32T, code => 0xe2b0000000000000, rule => qr"^$noPred?PCNT $i20w24;"o,                } ],
     EXIT   => [ { type => $x32T, code => 0xe30000000000000f, rule => qr"^$pred?EXIT;"o,                          } ],
-    PEXIT  => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?PEXIT.*?;"o,                      } ], #TODO
+    PEXIT  => [ { type => $x32T, code => 0x0000000000000000, rule => qr"^$pred?PEXIT[^;]*;"o,                    } ], #TODO
     BPT    => [ { type => $x32T, code => 0xe3a00000000000c0, rule => qr"^$noPred?BPT\.TRAP $i20w24;"o,           } ],
 
     #Miscellaneous Instructions
@@ -383,7 +392,7 @@ our %grammar =
     DEPBAR => [ { type => $x32T,  code => 0xf0f0000000000000, rule => qr"^$pred?DEPBAR$dbar;"o,                             } ],
     MEMBAR => [ { type => $x32T,  code => 0xef98000000000000, rule => qr"^$pred?MEMBAR$mbar;"o,                             } ],
     VOTE   => [ { type => $x32T,  code => 0x50d8000000000000, rule => qr"^$pred?VOTE$vote (?:$r0, |(?<nor0>))$p45, $p39;"o, } ],
-    R2B    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?R2B.*?;"o,                                  } ], #TODO
+    R2B    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?R2B[^;]*;"o,                                } ], #TODO
 
     #Video Instructions... TODO
     # Quick and dirty VADD for now.  Just added to get 100% cublas_device.lib coverage.
@@ -804,8 +813,12 @@ ATOM: type
 0x0002000000000000 .S32
 0x0004000000000000 .U64
 0x0006000000000000 .F32.FTZ.RN
+0x0008000000000000 .F16x2.FTZ.RN
 0x000a000000000000 .S64
 0x0002000000000000 .64
+
+ATOM
+0x0001000000000000 E
 
 ATOM: mode
 0x0000000000000000 ADD
@@ -973,6 +986,185 @@ sub genCode
     return $code, $reuse;
 }
 
+
+my $CtrlRe = qr'(?<ctrl>[0-9a-fA-F\-]{2}:[1-6\-]:[1-6\-]:[\-yY]:[0-9a-fA-F])';
+my $PredRe = qr'(?<pred>@!?(?<predReg>P\d)\s+)';
+my $InstRe = qr"$PredRe?(?<op>\w+)(?<rest>[^;]*;)"o;
+my $CommRe = qr'(?<comment>.*)';
+
+sub processAsmLine
+{
+    my ($line, $lineNum) = @_;
+
+    if ($line =~ m"^$CtrlRe(?<space>\s+)$InstRe$CommRe"o)
+    {
+        return {
+            lineNum => $lineNum,
+            pred    => $+{pred},
+            predReg => $+{predReg},
+            space   => $+{space},
+            op      => $+{op},
+            comment => $+{comment},
+            inst    => normalizeSpacing($+{pred} . $+{op} . $+{rest}),
+            ctrl    => readCtrl($+{ctrl}, $line),
+        };
+    }
+    return undef;
+}
+
+sub processSassLine
+{
+    my $line = shift;
+
+    if ($line =~ m"^\s+/\*(?<num>[0-9a-f]+)\*/\s+$InstRe\s+/\* (?<code>0x[0-9a-f]+)"o)
+    {
+        return {
+            num     => hex($+{num}),
+            pred    => $+{pred},
+            op      => $+{op},
+            ins     => normalizeSpacing($+{op} . $+{rest}),
+            inst    => normalizeSpacing($+{pred} . $+{op} . $+{rest}),
+            code    => hex($+{code}),
+        };
+    }
+    return undef;
+}
+
+sub processSassCtrlLine
+{
+    my ($line, $ctrl, $ruse) = @_;
+
+    return 0 unless $line =~ m'^\s+\/\* (0x[0-9a-f]+)';
+
+    my $code = hex($1);
+    if (ref $ctrl)
+    {
+        push @$ctrl, ($code & 0x000000000001ffff) >> 0;
+        push @$ctrl, ($code & 0x0000003fffe00000) >> 21;
+        push @$ctrl, ($code & 0x07fffc0000000000) >> 42;
+    }
+    if (ref $ruse)
+    {
+        push @$ruse, ($code & 0x00000000001e0000) >> 17;
+        push @$ruse, ($code & 0x000003c000000000) >> 38;
+        push @$ruse, ($code & 0x7800000000000000) >> 59;
+    }
+    return 1;
+}
+
+sub replaceXMADs
+{
+    my $file = shift;
+
+    # XMAD.LO d, a, b, c, x;
+    # ----------------------
+    # XMAD.MRG x, a, b.H1, RZ;
+    # XMAD d, a, b, c;
+    # XMAD.PSL.CBCC d, a.H1, x.H1, d;
+    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?:(?<bi>-?$immed)|(?<br>\w+))\s*,\s*(?<c>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<x>\w+)\s*;$CommRe/
+
+        my $replace;
+        if (exists $+{br})
+        {
+            $replace = sprintf '
+%1$s%2$s%3$sXMAD.MRG %8$s, %5$s, %6$s.H1, RZ;%9$s
+%1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;
+%1$s%2$s%3$sXMAD.PSL.CBCC %4$s, %5$s.H1, %8$s.H1, %4$s;',
+                @+{qw(ctrl space pred d a br c x comment)}
+        }
+        # immediate must be <= 0xffff
+        elsif (getI($+{bi}, 0, 0xffffffff) <= 0xffff)
+        {
+             $replace = sprintf '
+%1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;
+%1$s%2$s%3$sXMAD.PSL.CBCC %4$s, %5$s.H1, %6$s, %4$s;',
+                @+{qw(ctrl space pred d a bi c x comment)}
+        }
+        else
+        {
+             die "Error at:\n$&\n\nImmediates for XMAD.LO must be <= 0xffff.\nUse a MOV32I prior to this instruction as a work around.\n";
+        }
+        $replace;
+    /egmos;
+
+    #TODO: add more XMAD macros
+    return $file;
+}
+# convert extra spaces to single spacing to make our re's simplier
+sub normalizeSpacing
+{
+    my $inst = shift;
+    $inst =~ s/\t/ /g;
+    $inst =~ s/\s{2,}/ /g;
+    return $inst;
+}
+
+
+# map binary control notation on to easier to work with format.
+sub printCtrl
+{
+    my $code = shift;
+
+    my $stall = ($code & 0x0000f) >> 0;
+    my $yield = ($code & 0x00010) >> 4;
+    my $wrtdb = ($code & 0x000e0) >> 5;  # write dependency barier
+    my $readb = ($code & 0x00700) >> 8;  # read  dependency barier
+    my $watdb = ($code & 0x1f800) >> 11; # wait on dependency barier
+
+    $yield = $yield ? '-' : 'Y';
+    $wrtdb = $wrtdb == 7 ? '-' : $wrtdb + 1;
+    $readb = $readb == 7 ? '-' : $readb + 1;
+    $watdb = $watdb ? sprintf('%02x', $watdb) : '--';
+
+    return sprintf '%s:%s:%s:%s:%x', $watdb, $readb, $wrtdb, $yield, $stall;
+}
+sub readCtrl
+{
+    my ($ctrl, $context) = @_;
+    my ($watdb, $readb, $wrtdb, $yield, $stall) = split ':', $ctrl;
+
+    $watdb = $watdb eq '--' ? 0 : hex $watdb;
+    $readb = $readb eq '-'  ? 7 : $readb - 1;
+    $wrtdb = $wrtdb eq '-'  ? 7 : $wrtdb - 1;
+    $yield = $yield eq 'y' || $yield eq 'Y'  ? 0 : 1;
+    $stall = hex $stall;
+
+    die sprintf('wait dep out of range(0x00-0x3f): %x at %s',   $watdb, $context) if $watdb != ($watdb & 0x3f);
+
+    return
+        $watdb << 11 |
+        $readb << 8  |
+        $wrtdb << 5  |
+        $yield << 4  |
+        $stall << 0;
+}
+
+sub getVecRegisters
+{
+    my ($vectors, $capData) = @_;
+    my $regName = $capData->{r0} or return;
+    return if $regName eq 'RZ';
+
+    if ($capData->{type} eq '.64' || $capData->{i31w4} eq '0x3')
+    {
+        if ($regName =~ m'^R(\d+)$')
+        {
+            return map "R$_", ($1 .. $1+1);
+        }
+        confess "$regName not a 64bit vector register" unless exists $vectors->{$regName};
+        return @{$vectors->{$regName}}[0,1];
+    }
+    if ($capData->{type} eq '.128' || $capData->{i31w4} eq '0xf')
+    {
+        if ($regName =~ m'^R(\d+)$')
+        {
+            return map "R$_", ($1 .. $1+3);
+        }
+        confess "$regName not a 128bit vector register" unless exists($vectors->{$regName}) && @{$vectors->{$regName}} == 4;
+        return @{$vectors->{$regName}};
+    }
+    return $regName;
+}
 
 __END__
 

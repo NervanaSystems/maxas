@@ -11,25 +11,33 @@
 // Use extern C so C++ doesn't mangle our kernel name
 extern "C" __global__ void  microbench(int *out, int *clocks, int *in)
 {
-	__shared__ int share[4096];
+    __shared__ int share[128];
 
-	int tid = threadIdx.x;
-	int blkdim = blockDim.x;
+    int tid = threadIdx.x;
+    int bx  = blockIdx.x;
+    int by  = blockIdx.y;
+    int blkDimX = blockDim.x;
+    int blkDimY = blockDim.y;
+    int blkDimZ = blockDim.z;
+    int grdDimX = gridDim.x;
+    int grdDimY = gridDim.y;
+    int grdDimZ = gridDim.z;
 
-	int start = clock(); 
 
-	share[tid] = in[tid + blkdim];
+    int start = clock();
 
-	__syncthreads();
+    share[tid] = in[by * 65535 + bx]; //tid + blkDimX + blkDimY + blkDimZ + grdDimX + grdDimY + grdDimZ
 
-	int end = clock();
+    __syncthreads();
 
-	clocks[tid] = end - start;
+    int end = clock();
 
-	out[tid] = share[tid ^ 1];
+    clocks[tid] = end - start;
+
+    out[tid] = share[tid ^ 1];
 }
 
-// A note about using the Cuda Runtime.  
+// A note about using the Cuda Runtime.
 // If that's your preference over the driver API then here's what you'd do:
 
 // In your project properties in the Cuda C/C++ panel:
@@ -39,10 +47,10 @@ extern "C" __global__ void  microbench(int *out, int *clocks, int *in)
 // Rebuild your solution and look in the log for these lines that follow the ptxas step:
 
 // #$ fatbinary --create="Release/kernel.fatbin" -32 --key="a7bce87544c2a492" --ident="C:/Users/Scott/Documents/sgemm6/sgemm6/kernel.cu" --cmdline="-v --opt-level 4 --generate-line-info " "--image=profile=sm_50,file=Release/kernel.sm_50.cubin" "--image=profile=compute_50,file=Release/kernel.ptx" --embedded-fatbin="Release/kernel.fatbin.c" --cuda
-// #$ cl.exe @Release/kernel.cu.cpp.ii.res > "Release/kernel.cu.cpp.ii" 
-// #$ cl.exe @Release/kernel.cu.obj.res -Fo"Release/kernel.cu.obj" 
+// #$ cl.exe @Release/kernel.cu.cpp.ii.res > "Release/kernel.cu.cpp.ii"
+// #$ cl.exe @Release/kernel.cu.obj.res -Fo"Release/kernel.cu.obj"
 
-// You just need to manually run these 3 commands (or add them to a build script) 
+// You just need to manually run these 3 commands (or add them to a build script)
 // after you've modified the cubin generated from the preceeding ptxas command.
 // That will give you a new .cu.obj file which will automatically be linked in for you next time you
 // build your project (or you could manually run the linker step as well).

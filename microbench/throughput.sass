@@ -23,7 +23,8 @@
 --:-:-:-:1      MOV R5, RZ;
 --:-:-:-:1      MOV R6, RZ;
 --:-:-:-:1      MOV R7, RZ;
---:-:-:Y:6      MOV R8, RZ;
+--:-:-:-:1      MOV R8, RZ;
+--:-:-:Y:6      MOV count, RZ;
 
 // This loop is capable of running at 1700 GFlops on GM107.
 // You can tweak it to see how register bank conflicts or different control codes
@@ -37,12 +38,12 @@ LOOP:
 <CODE>
     my $out;
 
-    foreach my $i (0..511)
+    foreach my $i (0..511) #511
     {
         my $y = ($i + 32) & 63 ? '-' : 'Y';
 
         $out .= qq|
---:-:-:$y:1      FFMA R0, R0, R1, R2;|;
+--:-:-:$y:1      FFMA R0, R1, R2, R3;|; #c[0x0][$c]
     }
     return $out;
 </CODE>

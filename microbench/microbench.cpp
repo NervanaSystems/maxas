@@ -56,15 +56,16 @@ int main(int argc, char* argv[])
 	int blocks = 1;
 	if (argc > 2)
 		blocks = atoi(argv[2]);
-	if (blocks > 10 || blocks < 1)
+	if (blocks < 1)
 		blocks = 1;
 
 	// Third command line arg is the number of threads in multiples of 128
-	int thread128 = 1;
+	int threads = 128;
 	if (argc > 3)
-		thread128 = atoi(argv[3]);
-	if (thread128 > 8 || thread128 < 1)
-		thread128 = 1;
+		threads = atoi(argv[3]);
+	if (threads > 1024 || threads < 32)
+		threads = 128;
+	threads &= -32;
 
 	// Forth command line arg:
 	double fops = 1.0;
@@ -83,8 +84,14 @@ int main(int argc, char* argv[])
 			fops = atof(argv[4]);
 	}
 
+	// Fifth command line arg is the repeat count for benchmarking
+	int repeat = 1;
+	if (argc > 5)
+		repeat = atoi(argv[5]);
+	if (repeat > 1000 || repeat < 1)
+		repeat = 1;
+
 	// threads = total number of threads
-	int threads = thread128 * 128;
 	size_t size = sizeof(int) * threads * blocks;
 
 	// Setup our input and output buffers
@@ -119,8 +126,9 @@ int main(int argc, char* argv[])
 	float ms = 0;
 
 	// Warm up the clock (unless under nsight)
-	if (!getenv("NSIGHT_LAUNCHED")) // NSIGHT_CUDA_ANALYSIS NSIGHT_CUDA_DEBUGGER 
-		CUDA_CHECK( cuLaunchKernel(hKernel, blocks, 1, 1, threads, 1, 1, 0, 0, params, 0) );
+	if (!getenv("NSIGHT_LAUNCHED")) // NSIGHT_CUDA_ANALYSIS NSIGHT_CUDA_DEBUGGER
+		for (int i = 0; i < repeat; i++)
+			CUDA_CHECK( cuLaunchKernel(hKernel, blocks, 1, 1, threads, 1, 1, 0, 0, params, 0) );
 
 	// Launch the kernel
 	CUDA_CHECK( cuEventRecord(hStart, NULL) );

@@ -66,6 +66,7 @@ elsif ($mode =~ /^\-?\-e/i)
     my $cubinFile = shift or usage();
     my $asmFile   = shift;
     my $cubin     = Cubin->new($cubinFile);
+    my $arch      = $cubin->arch;
     my $kernels   = $cubin->listKernels;
 
     #default the kernel name if not specified.
@@ -73,7 +74,7 @@ elsif ($mode =~ /^\-?\-e/i)
 
     my $kernel = $kernels->{$kernelName} or die "bad kernel: $kernelName";
 
-    open my $in, "cuobjdump.exe -arch sm_50 -sass -fun $kernelName $cubinFile |" or die "cuobjdump.exe -arch sm_50 -sass -fun $kernelName $cubinFile: $!";
+    open my $in, "cuobjdump.exe -arch sm_$arch -sass -fun $kernelName $cubinFile |" or die "cuobjdump.exe -arch sm_50 -sass -fun $kernelName $cubinFile: $!";
     my $first = <$in>;
     if ($first =~ /cuobjdump fatal/)
     {
@@ -90,7 +91,7 @@ elsif ($mode =~ /^\-?\-e/i)
         $out = \*STDOUT;
     }
 
-    print $out "# Kernel: $kernelName\n";
+    print $out "# Kernel: $kernelName\n# Arch: sm_$arch\n";
 
     print $out "# $_: $kernel->{$_}\n" foreach (qw(InsCnt RegCnt SharedSize BarCnt));
 
@@ -134,6 +135,10 @@ elsif ($mode =~ /^\-?\-i/i)
     $cubin->modifyKernel(%$kernel);
 
     $cubin->write($newCubin);
+
+    printf "Kernel: $kernelName, Instructions: %d, Register Count: %d, Bank Conflicts: %d, Reuse: %.1f% (%d/%d)\n",
+        @{$kernel}{qw(InsCnt RegCnt ConflictCnt ReusePct ReuseCnt ReuseTot)};
+
 }
 # Preprocessing:
 elsif ($mode =~ /^\-?\-p/i)
