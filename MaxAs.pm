@@ -28,7 +28,8 @@ sub Assemble
 
     my $regMap = {};
     $file = Preprocess($file, 0, $regMap);
-    my $vectors = $regMap->{__vectors};
+    my $vectors = delete $regMap->{__vectors};
+    my $regBank = delete $regMap->{__regbank};
 
     # initialize cubin counts
     my $regCnt = 0;
@@ -196,6 +197,23 @@ sub Assemble
             die "Unable to encode instruction: $inst\n";
         }
     }
+
+	# Assign registers to requested banks if possible
+	foreach my $r (sort keys %$regBank)
+	{
+		my $bank  = $regBank->{$r};
+		my $avail = $regMap->{$r};
+		foreach my $pos (0 .. $#$avail)
+		{
+			if ($bank == ($avail->[$pos] & 3))
+			{
+				# assign it, while removing the assigned register from the pool
+				$regMap->{$r} = 'R' . splice @$avail, $pos, 1;
+				last;
+			}
+		}
+	}
+
     # calculate register live times and preferred banks for non-fixed registers.
     # LiveTime only half implemented...
     my (%liveTime, %pairedBanks, %reuseHistory);
@@ -243,9 +261,8 @@ sub Assemble
                 }
             }
 
-            my (%addReuse, %delReuse);
-
             # liveTimes and bank conflicts with source operands
+            my (%addReuse, %delReuse);
             foreach my $slot (map $_, qw(r8 r20 r39 r39a))
             {
                 my $r = $capData{$slot} or next;
@@ -368,7 +385,7 @@ sub Assemble
             {
                 if ($bank == ($avail->[$pos] & 3))
                 {
-                    # assign it, while removing the assigned register to the pool
+                    # assign it, while removing the assigned register from the pool
                     $regMap->{$r} = 'R' . splice @$avail, $pos, 1;
                     # update bank info for any unassigned pair
                     $pairedBanks{$_}{banks}[$bank]++ foreach @{$pairedBanks{$r}{pairs}};
@@ -385,6 +402,7 @@ sub Assemble
             $regMap->{$r} = 'R' . shift @{$regMap->{$r}};
         }
     }
+    #print map "$regMap->{$_}: $_\n", sort { substr($regMap->{$a},1) <=> substr($regMap->{$b},1) } keys %$regMap;
 
     # apply the register mapping and assemble the instructions to op codes
     foreach my $i (0 .. $#instructs)
@@ -967,6 +985,7 @@ sub setRegisterMap
     my ($regMap, $regmapText) = @_;
 
     my $vectors = $regMap->{__vectors} ||= {};
+    my $regBank = $regMap->{__regbank} ||= {};
 
     foreach my $line (split "\n", $regmapText)
     {
@@ -990,24 +1009,31 @@ sub setRegisterMap
             die "Bad register number: $_ at: $line\n" if grep m'\D', $start, $stop;
             push @numList, ($start .. $stop||$start);
         }
-        foreach (split '\s*,\s*', $regNames)
+        foreach my $fullName (split '\s*,\s*', $regNames)
         {
-            if (m'^(\w+)<((?:\d+(?:\s*\-\s*\d+)?\s*\|?\s*)+)>(\w*)$')
+            if ($fullName =~ m'^(\w+)<((?:\d+(?:\s*\-\s*\d+)?\s*\|?\s*)+)>(\w*)(?:\[([0-3])\])?$')
             {
-                my ($name1, $name2) = ($1, $3);
+                my ($name1, $name2, $bank) = ($1, $3, $4);
                 foreach (split '\s*\|\s*', $2)
                 {
                     my ($start, $stop) = split '\s*\-\s*';
-                    push @nameList, map "$name1$_$name2", $start .. $stop||$start;
+                    foreach my $r (map "$name1$_$name2", $start .. $stop||$start)
+                    {
+                    	push @nameList, $r;
+                    	$regBank->{$r} = $bank if $auto && defined $bank;
+                    	warn "Cannot request a bank for a fixed register range: $fullName\n" if !$auto && defined $bank;
+                    }
                 }
             }
-            elsif (m'^\w+$')
+            elsif ($fullName =~ m'^(\w+)(?:\[([0-3])\])?$')
             {
-                push @nameList, $_;
+                push @nameList, $1;
+                $regBank->{$1} = $2 if $auto && defined $2;
+                warn "Cannot request a bank for a fixed register range: $fullName\n" if !$auto && defined $2;
             }
             else
             {
-                die "Bad register name: '$_' at: $line\n";
+                die "Bad register name: '$fullName' at: $line\n";
             }
         }
         die "Missmatched register mapping at: $line\n" if @numList < @nameList;
@@ -1043,6 +1069,7 @@ sub setRegisterMap
             }
         }
     }
+    #print Dumper($regMap); exit(1);
 }
 
 sub preProcessLine

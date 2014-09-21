@@ -48,17 +48,17 @@
     96-103  : loadX<0-7>
 
     // Key global state registers for main loop and some we reuse for outputing C.
-    // Note, tweaking the register values of tex, track<0|4>, writeS, readBs, readAs impacts performance because of
+    // Note, tweaking the register banks of track<0|4>, tex, writeS, readBs, readAs impacts performance because of
     // delayed bank conflicts between memory operations and ffmas.
-    104-127 : track<0|4>, end, tex, tid, ldx8, readAs, readBs, bx, by, writeS, tid31, tid96, tid128
-    //              0 1   2    3    0    1     2       3       0   1   2
+    // The array index bracket notation can be used to request a bank in a dynamically allocated range.
+    104-127 ~ track<0|4>[0], tex[1], ldx8[1], readAs[2], readBs[3], writeS[2], end, tid, bx, by, tid31, tid96, tid128
 
     // Registers to store the results back to global memory. Reuse any register not needed after the main loop.
     // Statically allocate cs0-7 because they're vector reegisters.
     64-71   : cs<0-7>
 
     // dynamically allocated C output registers(~)
-    72-103  ~ cy<00|04|08|12>, Cy<00|04|08|12>, ldc, ldc1, ldc4, ldc8, ldc60, writeCs, readCs, cx, ci, alpha, xmad_ci, xmad_D, D, blckDimX, gridDimX
+    72-103  ~ cy<00|04|08|12>, Cy<00|04|08|12>, ldc, ldc1, ldc4, ldc8, ldc60, writeCs, readCs, cx, ci, alpha, xmad_ci //, xmad_D, D, blckDimX, gridDimX
 
 </REGISTER_MAPPING>
 
@@ -355,7 +355,7 @@ LOOP:
             $insert{"j${j}c11"} = sprintf "--:-:-:-:1  %s LDS j%dAx67, [readAs + 4x<%d*128 + 67>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c12"} = sprintf "--:-:-:-:1  %s LDS j%dBy64, [readBs + 4x<%d*128 + 64>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c13"} = sprintf "--:-:-:-:1  %s LDS j%dBy65, [readBs + 4x<%d*128 + 65>];\n", $rsPred, $nOdd, $rsOffset;
-            $insert{"j${j}c14"} = sprintf "--:-:1:-:1  %s LDS j%dBy66, [readBs + 4x<%d*128 + 66>];\n", $rsPred, $nOdd, $rsOffset;
+            $insert{"j${j}c14"} = sprintf "--:-:-:-:1  %s LDS j%dBy66, [readBs + 4x<%d*128 + 66>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c15"} = sprintf "--:-:1:-:1  %s LDS j%dBy67, [readBs + 4x<%d*128 + 67>]; // Set Dep 1\n", $rsPred, $nOdd, $rsOffset;
         }
         foreach my $c (0 .. 63)
