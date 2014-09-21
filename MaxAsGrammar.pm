@@ -211,7 +211,7 @@ my $iAddr = qr"";
 my $addr  = qr"\[(?:(?<r8>$reg)|(?<nor8>))(?:\s*\+?\s*$i20w24)?\]"o;
 my $addr2 = qr"\[(?:(?<r8>$reg)|(?<nor8>))(?:\s*\+?\s*$i28w20)?\]"o;
 my $ldc   = qr"c\[(?<c36>$hex)\]\s*$addr"o;
-my $atom  = qr"(?<E>\.E)?(?:\.(?<mode>ADD|MIN|MAX|INC|DEC|AND|OR|XOR|EXCH|CAS))(?<type>|\.S32|\.U64|\.F(?:16x2|16x4|32)\.FTZ\.RN|\.S64|\.64)";
+my $atom  = qr"(?<E>\.E)?(?:\.(?<mode>ADD|MIN|MAX|INC|DEC|AND|OR|XOR|EXCH|CAS))(?<type>|\.S32|\.U64|\.F(?:16x2|32)\.FTZ\.RN|\.S64|\.64)";
 my $vote  = qr"\.(?<mode>ALL|ANY|EQ)"o;
 my $memType  = qr"(?<type>\.U8|\.S8|\.U16|\.S16||\.32|\.64|\.128)";
 my $memCache = qr"(?<E>\.E)?(?<U>\.U)?(?:\.(?<cache>CG|CI|CS|CV|IL|WT))?";
@@ -807,6 +807,8 @@ RED: mode
 0x0000000002800000 AND
 0x0000000003000000 OR
 0x0000000003800000 XOR
+
+    //  .add, // .u32, .s32, .f32, .u64
 
 ATOM: type
 0x0000000000000000

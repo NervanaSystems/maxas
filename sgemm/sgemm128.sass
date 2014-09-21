@@ -239,7 +239,7 @@ LOOP:
         # apply the swirl
         foreach my $x (@xVals)
         {
-            push @cOrder, sprintf('x%02dy%02d', $x + $_->[0], $y + $_->[1]) foreach @swirl;
+            push @cOrder, [$x + $_->[0], $y + $_->[1]] foreach @swirl;
         }
         # apply the zigzag
         @xVals = reverse @xVals;
@@ -254,7 +254,7 @@ LOOP:
     #foreach my $y (0..3,64..67)
     #{
     #    @xVals = reverse @xVals;
-    #    push @cOrder2, sprintf('x%02dy%02d',$_,$y) foreach @xVals;
+    #    push @cOrder2, [$_, $y] foreach @xVals;
     #}
     #@cOrder = @cOrder2;
 
@@ -264,6 +264,8 @@ LOOP:
         # These global reads and shared writes we put exactly in the middle of the LDS ops
         # This is to not overwhelm the memory units with instructions (and because these were tested faster here).
         # The 4 spacing seems to work best for vec4 instructions.
+        # It's odd that these two textures loads can drive 512 FFMA's all by themselves.. but 256 threads can load 8 128 F32 wide lines.
+        # So we only need 2 to get 8 lines from both matrices.
 
         j0c30 => "--:-:2:-:1  \@P0 TLD.B.LZ.P loadX0, track0, tex, 0x0, 1D, 0xf; // Set Dep 2\n",
         j0c34 => "--:-:3:-:1  \@P0 TLD.B.LZ.P loadX4, track4, tex, 0x0, 1D, 0xf; // Set Dep 3\n",
@@ -357,7 +359,7 @@ LOOP:
         }
         foreach my $c (0 .. 63)
         {
-            my ($x,$y) = $cOrder[$c] =~ /^(x\d+)(y\d+)/;
+            my ($x,$y) = @{$cOrder[$c]};
 
             # Grab an instruction for insertion if one exists for this j and c combination
             my $ins    = $insert{"j${j}c$c"} || '';
@@ -367,15 +369,15 @@ LOOP:
             my $yield  = $c == 32 ? 'Y' : '-';
 
             # The first FFMA needs to wait on the prior loop's LDS.U.128 ops to finish (except if the barrier does the wait for us)
-            my ($waitDB, $comment) = $c == 0 && $j < 7 ? ('01', ' // Wait Dep 1') : ('--','');
+            my ($wait, $comment) = $c == 0 && $j < 7 ? ('01', ' // Wait Dep 1') : ('--','');
 
             # Dual issue these ops
             my $stall  = $ins =~ /LDS|TLD|STS|BAR/ ? 0 : 1;
 
-            my $ctrl   = "$waitDB:-:-:$yield:$stall";
+            my $ctrl   = "$wait:-:-:$yield:$stall";
 
             # output our FFMA and also any inserted ops
-            $out .= sprintf "%s      FFMA c%s, j%dA%s, j%dB%s, c%s;%s\n%s", $ctrl, $cOrder[$c], $odd, $x, $odd, $y, $cOrder[$c], $comment, $ins;
+            $out .= sprintf "%s      FFMA cx%02dy%02d, j%dAx%02d, j%dBy%02d, cx%02dy%02d;%s\n%s", $ctrl,  $x,$y,  $odd,$x,  $odd,$y,  $x,$y,  $comment,  $ins;
         }
     }
     return $out;

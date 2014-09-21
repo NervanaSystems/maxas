@@ -5,7 +5,7 @@ my %p;
 $p{N}         = 5120;
 $p{blocking}  = 8;
 $p{unroll}    = 8;
-$p{threads}   = 64;   #256
+$p{threads}   = 256;   #256
 
 $p{csize}     = $p{blocking} * $p{blocking};
 $p{loopSize}  = $p{unroll} * $p{csize};
@@ -32,7 +32,7 @@ print `maxas.pl -i $fileName microbench.cubin`;
 
 exit if $?;
 
-my $data = `Release\\microbench.exe e $p{blocks} $p{threads} $p{fops} 20`;
+my $data = `Release\\microbench.exe e $p{blocks} $p{threads} $p{fops} 100`;
 
 my ($gflops) = $data =~ /GFLOPS: ([0-9]+)/ms;
 
@@ -70,12 +70,13 @@ sub writeSassFile
 
     100-101 : count, stop
 
-    110-111 : readAs, readBs
+    110-112 : readAs, readBs, writeS
 
 </REGISTER_MAPPING>
 
 --:-:-:-:1      MOV count, RZ;
 --:-:-:-:1      MOV32I stop, %d;
+--:-:-:-:1      MOV writeS, RZ;
 --:-:-:-:1      MOV readAs, RZ;
 --:-:-:-:1      MOV readBs, RZ;
 
@@ -122,11 +123,19 @@ LOOP:
             c6 => "--:-:1:-:1      LDS.U.128 j${nOdd}By64, [readBs+0x10];\n",
         );
 
+        $insert{c62} =
+                "01:-:-:-:5      BAR.SYNC 0;                            // Wait Dep 1\n" .
+                "--:-:-:-:1      LOP.XOR readAs, readAs, 0;\n" .
+                "--:-:-:-:1      LOP.XOR readBs, readBs, 0;\n" .
+                "--:-:-:-:1      LOP.XOR readAs, readAs, 0;\n" .
+                "--:-:-:-:1      LOP.XOR readBs, readBs, 0;\n" .
+                "--:-:-:-:1      LOP.XOR writeS, writeS, 0;\n" if $j == 6;
+
         foreach my $c (0 .. 63)
         {
             my ($x,$y) = $cOrder[$c] =~ /^(x\d+)(y\d+)/;
             my $ins    = $insert{"c$c"} || '';
-            my $stall  = $ins ? 0 : 1;
+            my $stall  = $ins || ($c == 63 && $j == 7) ? 0 : 1;
             my $yield  = $c == 32 ? 'Y' : '-';
             my $wait   = $c ? '--' : '01';
 

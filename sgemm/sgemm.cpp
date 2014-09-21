@@ -132,20 +132,20 @@ int main(int argc, char* argv[])
 			CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
 
 	// Launch our kernel
-	ms = assemblySgemm("sgemm_kernel_64",  devC, devA, devB, N, hStart, hStop, repeat, printVars);
-	gflops("Max64 ", N, ms, repeat);
+	//ms = assemblySgemm("sgemm_kernel_64",  devC, devA, devB, N, hStart, hStop, repeat, printVars);
+	//gflops("Max64 ", N, ms, repeat);
 
 	ms = assemblySgemm("sgemm_kernel_128", devC, devA, devB, N, hStart, hStop, repeat, printVars);
 	gflops("Max128", N, ms, repeat);
 
 	// Run cublas again for the same repeat count for comparison
-	CUDA_CHECK( cuEventRecord(hStart, NULL) );
-	for (int i = 0; i < 1; i++)
-		CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
-	CUDA_CHECK( cuEventRecord(hStop, NULL) );
-	CUDA_CHECK( cuEventSynchronize(hStop) );
-	CUDA_CHECK( cuEventElapsedTime(&ms, hStart, hStop) );
-	gflops("Cublas", N, ms, 1);
+	//CUDA_CHECK( cuEventRecord(hStart, NULL) );
+	//for (int i = 0; i < 1; i++)
+	//	CUBLAS_CHECK( cublasSgemm(hCublas, CUBLAS_OP_N, CUBLAS_OP_T, N, N, N, &alpha, reinterpret_cast<float*>(devA), N, reinterpret_cast<float*>(devB), N, &beta, reinterpret_cast<float*>(devT), N) );
+	//CUDA_CHECK( cuEventRecord(hStop, NULL) );
+	//CUDA_CHECK( cuEventSynchronize(hStop) );
+	//CUDA_CHECK( cuEventElapsedTime(&ms, hStart, hStop) );
+	//gflops("Cublas", N, ms, 1);
 
 	// Get back our results from each kernel
 	CUDA_CHECK( cuMemcpyDtoH(C, devC, size) );

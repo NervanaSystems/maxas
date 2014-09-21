@@ -175,7 +175,7 @@ LOOP:
     {
         foreach my $x (@x)
         {
-            push @cOrder, sprintf('x%02dy%02d', $x + $_->[0], $y + $_->[1]) foreach @swirl;
+            push @cOrder, [$x + $_->[0], $y + $_->[1]] foreach @swirl;
         }
         @x = reverse @x;
     }
@@ -223,7 +223,7 @@ LOOP:
 
         foreach my $c (0 .. 63)
         {
-            my ($x,$y) = $cOrder[$c] =~ /^(x\d+)(y\d+)/;
+            my ($x,$y) = @{$cOrder[$c]};
 
             my $ins    = $insert{"j${j}c$c"} || '';
 
@@ -235,7 +235,7 @@ LOOP:
 
             my $ctrl   = "$wait:-:-:$yield:$stall";
 
-            $out .= sprintf "%s      FFMA c%s, j%dA%s, j%dB%s, c%s;%s\n%s", $ctrl, $cOrder[$c], $odd, $x, $odd, $y, $cOrder[$c], $comment, $ins;
+            $out .= sprintf "%s      FFMA cx%02dy%02d, j%dAx%02d, j%dBy%02d, cx%02dy%02d;%s\n%s", $ctrl,  $x,$y,  $odd,$x,  $odd,$y,  $x,$y,  $comment,  $ins;
         }
     }
     return $out;
