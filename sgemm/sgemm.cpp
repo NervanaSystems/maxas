@@ -291,7 +291,7 @@ void gflops(const char* ident, int N, float ms, int repeat)
 {
 	// Standard sgemm flops formula
 	ms /= repeat;
-	printf("%s GFLOPS: %.2f (size: %d, iterations: %d)\n", ident, ((double)N * N * N * 2.0) / (ms * 1000000.0), N, repeat);
+	printf("%s GFLOPS: %.2f (size: %d, iterations: %d)\n", ident, ((double)N * N * N * 2.0 + N * N) / (ms * 1000000.0), N, repeat);
 }
 
 void test(float* C, float* T, int N, size_t size)

@@ -64,6 +64,7 @@
 
 // Note the absense of the loading of the stack pointer into R1.
 // No idea why ptxas does that anyway when it's not used for register spilling.
+// Such a waste of a perfectly good register.
 
 // Scheduler doesn't handle the dependency flags yet,
 // so move these first instructions outside the block that's auto scheduled
@@ -323,10 +324,10 @@ LOOP:
         }
         elsif ($vec == 64)
         {
-            # LDS.128 runs about 22 Gflops faster than LDS.64 (GM107).  Not a huge difference since our latencies are so well hidden.
+            # LDS.64 runs about 22 Gflops slower than LDS.128 (GM107).  Not a huge difference since our latencies are so well hidden.
             # I think LDS.128 is implemented internally as a pair of LDS.64 ops which could be another reason for the comparable performance.
             # I think the big benefit with 128 is being able to issue all our LDS ops earlier, allowing more FFMA's prior to reading out the results.
-            # There could be additional opportunity for delayed bank conflicts.
+            # There could also be additional opportunity for delayed bank conflicts.
             $insert{"j${j}c0"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx00, [readAs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c2"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dAx02, [readAs + 4x<%d*128 + 02>];\n", $rsPred, $nOdd, $rsOffset;
             $insert{"j${j}c4"}  = sprintf "--:-:-:-:1  %s LDS.U.64 j%dBy00, [readBs + 4x<%d*128 + 00>];\n", $rsPred, $nOdd, $rsOffset;
@@ -423,8 +424,8 @@ LOOP:
 --:-:-:-:1      ISCADD  Cy00, ci, c[0x0][0x140], 2;
 
 // When writing in assembly, being able to 'printf' is sometimes easier than stepping through the debugger.
-// Here's how it's done.  Drop something like this in your code (math assumes 256 threads and 1 block).
-// Then modify the c code to accept this many params per thread to printf (see assemblySgemm function).
+// Here's how it's done.  Drop something like this in your code. Then modify the c code to accept this
+// many params per thread to printf (see assemblySgemm function).
 
 // D += ((by * gridDimX * blockDimX * vars) + (bx * blockDimX * vars) + (tid * vars)) * 4
 // D += ((by * gridDimX + bx) * blockDimX + tid) * vars * 4

@@ -15,7 +15,7 @@ print `maxas.pl -e -k sgemm_kernel_128 sgemm.cubin sgemm_final.sass`;
 
 #print `Release\\sgemm.exe $_ 20` foreach (80,60,40,30,20,10,9,8,7,6,5,4,3,2);
 
-print `Release\\sgemm.exe 80 250`
+print `Release\\sgemm.exe 80 20`
 
 __END__
 
