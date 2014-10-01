@@ -385,8 +385,8 @@ LOOP:
 
             # Scatter some yields in there to better balance the workload and reduce sync stalls
             # Don't pair a yeild with the dual issued ffmas as that kills performance for some reason
-            # *** This no longer offers extra performance on MG204.  It still does for the 64 thread version. ***
-            my $yield  = $c == 64 ? 'Y' : '-';
+            ##### This no longer offers extra performance on GM204 as it did on GM107.  It still does for the 64 thread version. Keeping since it doesn't hurt. ####
+            my $yield  = $c == 32 ? 'Y' : '-';
 
             # The first FFMA needs to wait on the prior loop's LDS.U.128 ops to finish (except if the barrier does the wait for us)
             my ($wait, $comment) = $c == 0 && $j < 7 ? ('01', ' // Wait Dep 1') : ('--','');
