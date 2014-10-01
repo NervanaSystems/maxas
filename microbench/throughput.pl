@@ -1,58 +1,46 @@
 #!/usr/bin/perl
 use strict;
 
-my %data;
+my $loopSize  = 512;
+my $blocks    = 32;
+my $loops     = 10240000;
+my $fileName  = 'throughput2.sass';
 
-foreach my $thread128 (1 .. 8)
+writeSassFile($fileName, $loops);
+
+#print `maxas.pl -p $fileName`;
+#exit;
+
+print `maxas.pl -i $fileName microbench.cubin`;
+exit if $?;
+
+foreach my $thread128 (2)
 {
-    foreach my $size64 (8 .. 16)
-    {
-        my $loopSize  = $size64 * 64;
-        my $loops     = int(2 * 1638400 / ($size64 * $thread128));
+    my $threads   = $thread128 * 128;
+    my $fops      = 2 * $loops * $loopSize * $blocks * $threads;
 
-        my $blocks    = 5;
-        my $threads   = $thread128 * 128;
-        my $fops      = 2 * $loops * $loopSize * $blocks * $threads;
-        my $fileName  = 'throughput2.sass';
+    my $data = `Release\\microbench.exe e $blocks $threads $fops`;
 
-        #printf "%d %4d %4d %d\n", $thread128, $loopSize, $loops, $fops;
-        #next;
+    my ($gflops) = $data =~ /GFLOPS: ([0-9]+)/ms;
 
-        writeSassFile($fileName, $loopSize, $loops);
-
-        `maxas.pl -i $fileName microbench.cubin`;
-
-        exit if $?;
-
-        my $data = `Release\\microbench.exe e $blocks $threads $fops`;
-
-        my ($gflops) = $data =~ /GFLOPS: ([0-9]+)/ms;
-
-        printf "%d %4d %4d %d\n", $thread128, $loopSize, $loops, $gflops;
-
-        push @{$data{$loopSize}}, $gflops;
-    }
-}
-print join("\t", 'size', 1 .. 8), "\n";
-foreach my $loopSize (sort {$a <=> $b} keys %data)
-{
-    print join("\t", $loopSize, @{$data{$loopSize}}), "\n";
+    printf "%d %d %d\n", $thread128, $threads, $gflops;
 }
 
 exit;
 
 sub writeSassFile
 {
-    my ($filename, $loopSize, $loops) = @_;
+    my ($filename, $loops) = @_;
 
     open my $fh, ">$filename" or die "$filename: $!";
 
-    printf $fh <<'EOF', $loops, $loopSize, $loopSize;
+    printf $fh <<'EOF', $loops;
 # Kernel: microbench
 
 <REGISTER_MAPPING>
 
-    0-10 : result, r1, r2, r3, count, stop
+    0-10 : result, r1, r2, r3
+    20-27 ~ count, stop
 
 </REGISTER_MAPPING>
 
@@ -70,11 +58,13 @@ LOOP:
 <CODE>
     my $out;
 
-    foreach my $i (0 .. %d)
+    foreach my $i (0 .. 511)
     {
-        my $y = %d > 64 && (($i + 32) & 63) ? '-' : 'Y';
+        my $yield = ($i + 32) & 63 ? '-' : 'Y';
 
-        $out .= "--:-:-:$y:1      FFMA result, r1, r2, r3;\n";
+        my $stall = $i == 511 ? 0 : 1;
+
+        $out .= "--:-:-:$yield:$stall      FFMA result, r1, r2, r3;\n";
     }
     return $out;
 </CODE>

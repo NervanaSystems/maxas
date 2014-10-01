@@ -569,6 +569,44 @@
     ret;
 }
 
+.visible .entry special2(
+    .param .u32 .ptr.global.align 4 param_out32,
+    .param .u32 param_u32
+)
+{
+    .reg .u32 out32, in32;
+    .reg .s32 var<2>;
+
+    ld.param.u32 in32, [param_u32];
+    ld.param.u32 out32, [param_out32];
+
+    clz.b32 var0, in32;
+
+    st.global.s32 [out32+0], var0;
+    ret;
+}
+
+.visible .entry special3(
+    .param .u32 .ptr.global.align 4 param_out32,
+    .param .s16 param_s16,
+    .param .s32 param_s32
+)
+{
+    .reg .u32 out32;
+    .reg .s16 var16;
+    .reg .s32 var32;
+
+    ld.param.s16 var16, [param_s16];
+    ld.param.s32 var32, [param_s32];
+    ld.param.u32 out32, [param_out32];
+
+    //mad.wide.s16 var32, var16, var16, var32;
+    mad.lo.s16 var16, var16, 13, var16;
+
+    st.global.s16 [out32+0], var16;
+    ret;
+}
+
 .visible .entry special(
     .param .u32 .ptr.global.align 4 param_out32,
     .param .u32 .ptr.global.align 8 param_out64

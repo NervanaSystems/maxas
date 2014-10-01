@@ -1,0 +1,49 @@
+.version 4.1
+.target sm_50
+.address_size 64
+
+// ptxas -v -arch=sm_50 -m 32 --opt-level 4 -o cublas_sgemm.cubin cublas_sgemm.ptx
+
+// You can use maxas to insert cublas_device.lib code into a cubin built from this ptx.
+
+.visible .entry maxwell_sgemm_128x128_nt(
+	.param .u64 .ptr.global.align 8 param_A,
+	.param .u64 .ptr.global.align 8 param_B,
+	.param .u64 .ptr.global.align 8 param_C,
+	.param .s32 param_lda,
+	.param .s32 param_ldb,
+	.param .s32 param_ldc,
+	.param .s32 param_k,
+	.param .u64 .ptr.global.align 8 param_Alpha,
+	.param .u64 .ptr.global.align 8 param_Beta,
+	.param .s32 param_alpha,
+	.param .s32 param_beta,
+	.param .s32 param_flag
+)
+.reqntid 256
+{
+	.shared .align 16 .b8 share[16384];
+
+	ret;
+}
+
+.visible .entry maxwell_sgemm_128x64_nt(
+	.param .u64 .ptr.global.align 8 param_A,
+	.param .u64 .ptr.global.align 8 param_B,
+	.param .u64 .ptr.global.align 8 param_C,
+	.param .s32 param_lda,
+	.param .s32 param_ldb,
+	.param .s32 param_ldc,
+	.param .s32 param_k,
+	.param .u64 .ptr.global.align 8 param_Alpha,
+	.param .u64 .ptr.global.align 8 param_Beta,
+	.param .s32 param_alpha,
+	.param .s32 param_beta,
+	.param .s32 param_flag
+)
+.reqntid 256
+{
+	.shared .align 16 .b8 share[12288];
+
+	ret;
+}

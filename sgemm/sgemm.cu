@@ -96,3 +96,10 @@ __global__ void __launch_bounds__(64) sgemm_kernel_64(
 // Having done that you can call your kernel normally using the <<< >>> syntax.
 // Debugging will have to be with the sass syntax but that's what you'll want to see anyway.
 // With fatbin you can also keep non-maxwell optimized versions of your code.
+
+
+// I just discovered this also works as a shortcut to the above:
+// nvcc -lib -arch sm_52 -m 32 -use-cubin code=sm_52,cubin=sgemm.cubin -o sgemm.lib sgemm.cu
+
+// The cu kernel definitions above need to have empty bodies.
+// And, the cu file must be compiled to a lib seperately before linking.

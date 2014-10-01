@@ -35,7 +35,7 @@ int main(int argc, char* argv[])
 		CUDA_CHECK( cuDeviceGetAttribute (&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, hDevice) );
 		CUDA_CHECK( cuDeviceGetAttribute (&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, hDevice) );
 		CUDA_CHECK( cuDeviceGetName(deviceName, sizeof(deviceName), hDevice) );
-		if (major >= 5)
+		if (major >= 5 && minor >= 2)
 		{
 			printf("Using: Id:%d %s (%d.%d)\n\n", ordinal, deviceName, major, minor);
 			break;
@@ -126,9 +126,9 @@ int main(int argc, char* argv[])
 	float ms = 0;
 
 	// Warm up the clock (unless under nsight)
-	if (!getenv("NSIGHT_LAUNCHED")) // NSIGHT_CUDA_ANALYSIS NSIGHT_CUDA_DEBUGGER
-		for (int i = 0; i < repeat; i++)
-			CUDA_CHECK( cuLaunchKernel(hKernel, blocks, 1, 1, threads, 1, 1, 0, 0, params, 0) );
+	//if (!getenv("NSIGHT_LAUNCHED")) // NSIGHT_CUDA_ANALYSIS NSIGHT_CUDA_DEBUGGER
+	//	for (int i = 0; i < repeat; i++)
+	//		CUDA_CHECK( cuLaunchKernel(hKernel, blocks, 1, 1, threads, 1, 1, 0, 0, params, 0) );
 
 	// Launch the kernel
 	CUDA_CHECK( cuEventRecord(hStart, NULL) );

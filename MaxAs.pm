@@ -19,7 +19,7 @@ my %jumpOp     = (%relOffset, %absOffset);
 my %noDest     = map { $_ => 1 } qw(ST STG STS STL RED);
 
 # Map register slots to reuse control codes
-my %reuseSlots = (r8 => 1, r20 => 2, r39 => 4, r39a => 4);
+my %reuseSlots = (r8 => 1, r20 => 2, r39 => 4);
 
 # Preprocess and Assemble a source file
 sub Assemble
@@ -100,6 +100,8 @@ sub Assemble
         if ($instructs[$i]{inst} !~ m'(\w+);$' || !exists $labels{$1})
             { die "instruction has invalid label: $instructs[$i]{inst}"; }
 
+        $instructs[$i]{jump} = $labels{$1};
+
         if (exists $relOffset{$instructs[$i]{op}})
             { $instructs[$i]{inst} =~ s/(\w+);$/sprintf '0x%06x;', (($labels{$1} - $i - 1) * 8) & 0xffffff/e; }
         else
@@ -119,13 +121,12 @@ sub Assemble
         foreach my $gram (@{$grammar{$op}})
         {
             # Apply the rule pattern
-            next unless $inst =~ $gram->{rule};
-            my %capData = %+;
+            my $capData = parseInstruct($inst, $gram) or next;
 
             if ($doReuse)
             {
                 # get any vector registers for r0
-                my @r0 = getVecRegisters($vectors, \%capData);
+                my @r0 = getVecRegisters($vectors, $capData);
 
                 # There are 2 reuse slots per register slot
                 # The reuse hash points to most recent instruction index where register was last used in this slot
@@ -133,10 +134,8 @@ sub Assemble
                 # For writes to a register, clear any reuse opportunity
                 if (@r0 && !exists $noDest{$op})
                 {
-                    foreach my $slot (map $_, keys %reuseSlots)
+                    foreach my $slot (keys %reuseSlots)
                     {
-                        $slot = 'r39' if $slot eq 'r39a';
-
                         if (my $reuse = $reuse{$slot})
                         {
                             # if writing with a vector op, clear all linked registers
@@ -150,17 +149,13 @@ sub Assemble
                 # only track register reuse for instruction types this works with
                 if ($gram->{type}{reuse})
                 {
-                    foreach my $slot (map $_, keys %reuseSlots)
+                    foreach my $slot (keys %reuseSlots)
                     {
-                        next unless exists $capData{$slot};
+                        next unless exists $capData->{$slot};
 
-                        my $r = $capData{$slot};
+                        my $r = $capData->{$slot};
                         next if $r eq 'RZ';
-                        next if $r eq $capData{r0}; # dont reuse if we're writing this reg in the same instruction
-
-                        # for when r39 is actually r20 when a constant is at c39 (messy).
-                        $slot = 'r20' if $slot eq 'r39' & exists $capData{c39};
-                        $slot = 'r39' if $slot eq 'r39a';
+                        next if $r eq $capData->{r0}; # dont reuse if we're writing this reg in the same instruction
 
                         my $reuse = $reuse{$slot} ||= {};
 
@@ -186,7 +181,7 @@ sub Assemble
             # if reuse is disabled then pull value from code.
             elsif ($gram->{type}{reuse})
             {
-                $ctrl->{reuse}[($i & 3) - 1] = genReuseCode(\%capData);
+                $ctrl->{reuse}[($i & 3) - 1] = genReuseCode($capData);
             }
             $match = 1;
             last;
@@ -198,21 +193,21 @@ sub Assemble
         }
     }
 
-	# Assign registers to requested banks if possible
-	foreach my $r (sort keys %$regBank)
-	{
-		my $bank  = $regBank->{$r};
-		my $avail = $regMap->{$r};
-		foreach my $pos (0 .. $#$avail)
-		{
-			if ($bank == ($avail->[$pos] & 3))
-			{
-				# assign it, while removing the assigned register from the pool
-				$regMap->{$r} = 'R' . splice @$avail, $pos, 1;
-				last;
-			}
-		}
-	}
+    # Assign registers to requested banks if possible
+    foreach my $r (sort keys %$regBank)
+    {
+        my $bank  = $regBank->{$r};
+        my $avail = $regMap->{$r};
+        foreach my $pos (0 .. $#$avail)
+        {
+            if ($bank == ($avail->[$pos] & 3))
+            {
+                # assign it, while removing the assigned register from the pool
+                $regMap->{$r} = 'R' . splice @$avail, $pos, 1;
+                last;
+            }
+        }
+    }
 
     # calculate register live times and preferred banks for non-fixed registers.
     # LiveTime only half implemented...
@@ -228,49 +223,15 @@ sub Assemble
         foreach my $gram (@{$grammar{$op}})
         {
             # Apply the rule pattern
-            next unless $inst =~ $gram->{rule};
-            my %capData = %+;
+            my $capData   = parseInstruct($inst, $gram) or next;
             my $reuseType = $gram->{type}{reuse};
-
-            # liveTimes for destination operands and vector registers
-            foreach my $r0 (getVecRegisters($vectors, \%capData))
-            {
-                # fixed register mappings can have aliases so use the actual register value for those.
-                my $liveR = ref $regMap->{$r0} ? $r0 : $regMap->{$r0};
-
-                # If not writing treat just like a read
-                if (exists $noDest{$op})
-                {
-                    if (my $liveTime = $liveTime{$liveR})
-                    {
-                        $liveTime->[$#$liveTime][1] = $i;
-                    }
-                    else
-                    {
-                        warn "register used without initialization ($r0): $inst\n";
-						my $liveTime = $liveTime{$liveR} ||= [];
-						push @$liveTime, [$i,$i];
-                    }
-                }
-                # If writing, push a new bracket on this register's stack.
-                else
-                {
-                    # Initialize the liveTime stack for this register.
-                    my $liveTime = $liveTime{$liveR} ||= [];
-                    push @$liveTime, [$i,$i];
-                }
-            }
 
             # liveTimes and bank conflicts with source operands
             my (%addReuse, %delReuse);
-            foreach my $slot (map $_, qw(r8 r20 r39 r39a))
+            foreach my $slot (qw(r8 r20 r39))
             {
-                my $r = $capData{$slot} or next;
+                my $r = $capData->{$slot} or next;
                 next if $r eq 'RZ';
-
-                # for when r39 is actually r20 when a constant is at c39 (messy).
-                $slot = 'r20' if $slot eq 'r39' & exists $capData{c39};
-                $slot = 'r39' if $slot eq 'r39a';
 
                 my $liveR = ref $regMap->{$r} ? $r : $regMap->{$r};
 
@@ -279,12 +240,12 @@ sub Assemble
                 {
                     # for each read set the current instruction index as the high value
                     $liveTime->[$#$liveTime][1] = $i;
+                    push @{$liveTime->[$#$liveTime]}, "$i $inst";
                 }
                 else
                 {
                     warn "register used without initialization ($r): $inst\n";
-					my $liveTime = $liveTime{$liveR} ||= [];
-					push @$liveTime, [$i,$i];
+                    push @{$liveTime{$liveR}}, [$i,$i];
                 }
 
                 # Is this register active in the reuse cache?
@@ -298,15 +259,10 @@ sub Assemble
                 if (!$selfReuse && ref $regMap->{$r})
                 {
                     # Look at other source operands in this instruction and flag what banks are being used
-                    foreach my $slot2 (map $_, grep {exists $capData{$_}} qw(r8 r20 r39 r39a))
+                    foreach my $slot2 (grep {$_ ne $slot && exists $capData->{$_}} qw(r8 r20 r39))
                     {
-                        my $r2 = $capData{$slot2};
+                        my $r2 = $capData->{$slot2};
                         next if $r2 eq 'RZ' || $r2 eq $r;
-
-                        $slot2 = 'r20' if $slot2 eq 'r39' & exists $capData{c39};
-                        $slot2 = 'r39' if $slot2 eq 'r39a';
-
-                        next if $slot eq $slot2;
 
                         my $slotHist2 = $reuseHistory{$slot2} ||= {};
 
@@ -353,6 +309,40 @@ sub Assemble
             $reuseHistory{$_}{$addReuse{$_}} = 1    foreach keys %addReuse;
             delete $reuseHistory{$_}{$delReuse{$_}} foreach keys %delReuse;
 
+            # liveTimes for destination operands and vector registers
+            foreach my $r0 (getVecRegisters($vectors, $capData))
+            {
+                # fixed register mappings can have aliases so use the actual register value for those.
+                my $liveR = ref $regMap->{$r0} ? $r0 : $regMap->{$r0};
+
+                # If not writing treat just like a read
+                if (exists $noDest{$op})
+                {
+                    if (my $liveTime = $liveTime{$liveR})
+                    {
+                        $liveTime->[$#$liveTime][1] = $i;
+                        push @{$liveTime->[$#$liveTime]}, "$i $inst";
+                    }
+                    else
+                    {
+                        warn "register used without initialization ($r0): $inst\n";
+                        push @{$liveTime{$liveR}}, [$i,$i];
+                    }
+                }
+                # If writing, push a new bracket on this register's stack.
+                elsif (my $liveTime = $liveTime{$liveR})
+                {
+                    if ($i > $liveTime->[$#$liveTime][1])
+                    {
+                        push @{$liveTime{$liveR}}, [$i,$i, "$i $inst"];
+                    }
+                }
+                else
+                {
+                    # Initialize the liveTime stack for this register.
+                    push @{$liveTime{$liveR}}, [$i,$i, "$i $inst"];
+                }
+            }
 
             $match = 1;
             last;
@@ -363,6 +353,7 @@ sub Assemble
             die "Unable to encode instruction: $inst\n";
         }
     }
+    #print Dumper(\%liveTime); exit(1);
 
     # assign unassigned registers
     # sort by most restricted, then most used, then name
@@ -387,6 +378,7 @@ sub Assemble
                 {
                     # assign it, while removing the assigned register from the pool
                     $regMap->{$r} = 'R' . splice @$avail, $pos, 1;
+
                     # update bank info for any unassigned pair
                     $pairedBanks{$_}{banks}[$bank]++ foreach @{$pairedBanks{$r}{pairs}};
                     last BANK;
@@ -420,42 +412,41 @@ sub Assemble
         foreach my $gram (@{$grammar{$op}})
         {
             # Apply the rule pattern
-            next unless $inst =~ $gram->{rule};
-            my %capData = %+;
+            my $capData = parseInstruct($inst, $gram) or next;
 
             # update the register count
-            foreach my $r (qw(r0 r8 r20 r39 r39a))
+            foreach my $r (qw(r0 r8 r20 r39))
             {
-                next unless exists($capData{$r}) && $capData{$r} ne 'RZ';
+                next unless exists($capData->{$r}) && $capData->{$r} ne 'RZ';
 
                 # get numeric portion of regname
-                my $val = substr $capData{$r}, 1;
+                my $val = substr $capData->{$r}, 1;
 
                 # smart enough to count vector registers for memory instructions.
-                my $regInc = $r eq 'r0' ? scalar(getVecRegisters($vectors, \%capData)) : 1;
+                my $regInc = $r eq 'r0' ? scalar(getVecRegisters($vectors, $capData)) : 1;
 
                 $regCnt = $val + $regInc if $val + $regInc > $regCnt;
             }
             # update the barrier resource count
             if ($op eq 'BAR')
             {
-                if (exists $capData{i8w4})
+                if (exists $capData->{i8w4})
                 {
-                    $barCnt = $capData{i8w4}+1 if $capData{i8w4}+1 > $barCnt;
+                    $barCnt = $capData->{i8w4}+1 if $capData->{i8w4}+1 > $barCnt;
                 }
                 # if a barrier value is a register, assume the maximum
-                elsif (exists $capData{r8})
+                elsif (exists $capData->{r8})
                 {
                     $barCnt = 16;
                 }
             }
             # Generate the op code.
-            my ($code, $reuse) = genCode($op, $gram, \%capData);
+            my ($code, $reuse) = genCode($op, $gram, $capData);
             $instructs[$i]{code} = $code;
 
             # cache this for final pass when we want to calculate reuse stats.
             if ($gram->{type}{reuse})
-                { $instructs[$i]{caps} = \%capData; }
+                { $instructs[$i]{caps} = $capData; }
             # use the parsed value of reuse for non-reuse type instructions
             else
                 { $ctrl->{reuse}[($i & 3) - 1] = $reuse; }
@@ -541,40 +532,35 @@ sub Test
             my $match = 0;
             foreach my $gram (@{$grammar{$inst->{op}}})
             {
-                if ($inst->{inst} =~ $gram->{rule})
+                my $capData = parseInstruct($inst->{inst}, $gram) or next;
+                my @caps;
+
+                # Run in test mode to list what capture groups were captured
+                my ($code, $reuse) = genCode($inst->{op}, $gram, $capData, \@caps);
+
+                # Detect register bank conflicts but only for reuse type instructions.
+                # If a bank conflict is avoided by a reuse flag then ignore it.
+                registerHealth(\%reuseHistory, $reuse, $capData, $inst->{num}, $printConflicts ? $inst->{inst} : '') if $gram->{type}{reuse};
+
+                $inst->{caps}      = join ', ', sort @caps;
+                $inst->{codeDiff}  = $fileCode  ^ $code;
+                $inst->{reuseDiff} = $fileReuse ^ $reuse;
+
+                # compare calculated and file values
+                if ($code == $fileCode && $reuse == $fileReuse)
                 {
-                    my @caps;
-                    my %capData = %+;
-
-                    # Run in test mode to list what capture groups were captured
-                    my ($code, $reuse) = genCode($inst->{op}, $gram, \%capData, \@caps);
-
-                    # Detect register bank conflicts but only for reuse type instructions.
-                    # If a bank conflict is avoided by a reuse flag then ignore it.
-                    registerHealth(\%reuseHistory, $reuse, \%capData, $inst->{num}, $printConflicts ? $inst->{inst} : '') if $gram->{type}{reuse};
-
-                    $inst->{caps}      = join ', ', sort @caps;
-                    $inst->{codeDiff}  = $fileCode  ^ $code;
-                    $inst->{reuseDiff} = $fileReuse ^ $reuse;
-
-                    # compare calculated and file values
-                    if ($code == $fileCode && $reuse == $fileReuse)
-                    {
-                        $inst->{grade} = 'PASS';
-                        push @instructs, $inst if $all;
-                        $pass++;
-                    }
-                    else
-                    {
-                        $inst->{grade} = 'FAIL';
-                        push @instructs, $inst;
-                        $fail++;
-                    }
-
-
-                    $match = 1;
-                    last;
+                    $inst->{grade} = 'PASS';
+                    push @instructs, $inst if $all;
+                    $pass++;
                 }
+                else
+                {
+                    $inst->{grade} = 'FAIL';
+                    push @instructs, $inst;
+                    $fail++;
+                }
+                $match = 1;
+                last;
             }
             unless ($match)
             {
@@ -636,7 +622,7 @@ sub Extract
             my $inst = processSassLine($line) or next CTRL;
 
             # Convert branch/jump/call addresses to labels
-            if (exists($jumpOp{$inst->{op}}) && $inst->{inst} =~ m'(0x[0-9a-f]+)')
+            if (exists($jumpOp{$inst->{op}}) && $inst->{ins} =~ m'(0x[0-9a-f]+)')
             {
                 my $target = hex($1);
 
@@ -652,7 +638,7 @@ sub Extract
                     $labelnum++;
                 }
                 # replace address with name
-                $inst->{inst} =~ s/(0x[0-9a-f]+)/$label/;
+                $inst->{ins} =~ s/(0x[0-9a-f]+)/$label/;
             }
             $inst->{ctrl} = printCtrl($ctrl);
 
@@ -663,14 +649,14 @@ sub Extract
     foreach my $inst (@data)
     {
         print $out "$labels{$inst->{num}}:\n" if exists $labels{$inst->{num}};
-        printf $out "%s %5s%s\n", @{$inst}{qw(ctrl pred inst)};
+        printf $out "%s %5s%s\n", @{$inst}{qw(ctrl pred ins)};
     }
 }
 
-my $CommentRe  = qr'^\s*<COMMENT>.*?^\s*</COMMENT>\n?'ms;
-my $CodeRe     = qr'^\s*<CODE>(.*?)^\s*<\/CODE>\n?'ms;
-my $RegMapRe   = qr'^\s*<REGISTER_MAPPING>(.*?)^\s*</REGISTER_MAPPING>\n?'ms;
-my $ScheduleRe = qr'^\s*<SCHEDULE_BLOCK>(.*?)^\s*</SCHEDULE_BLOCK>\n?'ms;
+my $CommentRe  = qr'^[\t ]*<COMMENT>.*?^\s*</COMMENT>\n?'ms;
+my $CodeRe     = qr'^[\t ]*<CODE>(.*?)^\s*<\/CODE>\n?'ms;
+my $RegMapRe   = qr'^[\t ]*<REGISTER_MAPPING>(.*?)^\s*</REGISTER_MAPPING>\n?'ms;
+my $ScheduleRe = qr'^[\t ]*<SCHEDULE_BLOCK>(.*?)^\s*</SCHEDULE_BLOCK>\n?'ms;
 
 sub Preprocess
 {
@@ -711,7 +697,7 @@ sub Preprocess
 }
 
 # break the registers down into source and destination categories for the scheduler
-my %srcReg   = map { $_ => 1 } qw(r8 r20 r39 r39a p12 p29 p39);
+my %srcReg   = map { $_ => 1 } qw(r8 r20 r39 p12 p29 p39);
 my %destReg  = map { $_ => 1 } qw(r0 p0 p3 p45 p48);
 my %regops   = (%srcReg, %destReg);
 my @itypes   = qw(class lat rlat tput dual);
@@ -776,8 +762,7 @@ sub Scheduler
         my $match = 0;
         foreach my $gram (@{$grammar{$instruct->{op}}})
         {
-            next unless $instruct->{inst} =~ $gram->{rule};
-            my %capData = %+;
+            my $capData = parseInstruct($instruct->{inst}, $gram) or next;
             my (@dest, @src);
 
             # copy over instruction types for easier access
@@ -787,7 +772,7 @@ sub Scheduler
             push @src, $instruct->{predReg} if $instruct->{pred};
 
             # Populate our register source and destination lists, skipping any zero or true values
-            foreach my $operand (grep { exists $regops{$_} } keys %capData)
+            foreach my $operand (grep { exists $regops{$_} } keys %$capData)
             {
                 # figure out which list to populate
                 my $list = exists($destReg{$operand}) && !exists($noDest{$instruct->{op}}) ? \@dest : \@src;
@@ -795,10 +780,10 @@ sub Scheduler
                 # Filter out RZ and PT
                 my $badVal = substr($operand,0,1) eq 'r' ? 'RZ' : 'PT';
 
-                if ($capData{$operand} ne $badVal)
+                if ($capData->{$operand} ne $badVal)
                 {
                     # add the value to list with the correct prefix
-                    push @$list, $operand eq 'r0' ? getVecRegisters($vectors, \%capData) : $capData{$operand};
+                    push @$list, $operand eq 'r0' ? getVecRegisters($vectors, $capData) : $capData->{$operand};
                 }
             }
 
@@ -960,7 +945,7 @@ sub Scheduler
 
         # sort the ready list by stall time, mixing huristic, dependencies and line number
         @ready = sort {
-        	$a->{first}   <=> $b->{first}  ||
+            $a->{first}   <=> $b->{first}  ||
             $a->{stall}   <=> $b->{stall}  ||
             $b->{mix}     <=> $a->{mix}    ||
             $b->{deps}    <=> $a->{deps}   ||
@@ -986,6 +971,7 @@ sub setRegisterMap
 
     my $vectors = $regMap->{__vectors} ||= {};
     my $regBank = $regMap->{__regbank} ||= {};
+    my %aliases;
 
     foreach my $line (split "\n", $regmapText)
     {
@@ -1002,11 +988,11 @@ sub setRegisterMap
 
         my ($regNums, $regNames) = split '\s*[:~]\s*', $line;
 
-        my (@numList, @nameList);
-        foreach (split '\s*,\s*', $regNums)
+        my (@numList, @nameList, %vecAliases);
+        foreach my $num (split '\s*,\s*', $regNums)
         {
-            my ($start, $stop) = split '\s*\-\s*';
-            die "Bad register number: $_ at: $line\n" if grep m'\D', $start, $stop;
+            my ($start, $stop) = split '\s*\-\s*', $num;
+            die "REGISTER_MAPPING Error: Bad register number or range: $num\nLine: $line\nFull Context:\n$regmapText\n" if grep m'\D', $start, $stop;
             push @numList, ($start .. $stop||$start);
         }
         foreach my $fullName (split '\s*,\s*', $regNames)
@@ -1019,9 +1005,11 @@ sub setRegisterMap
                     my ($start, $stop) = split '\s*\-\s*';
                     foreach my $r (map "$name1$_$name2", $start .. $stop||$start)
                     {
-                    	push @nameList, $r;
-                    	$regBank->{$r} = $bank if $auto && defined $bank;
-                    	warn "Cannot request a bank for a fixed register range: $fullName\n" if !$auto && defined $bank;
+                        # define an alias for use in vector instructions that omits the number portion
+                        $aliases{$r} = "$name1$name2" unless exists $aliases{$r};
+                        push @nameList, $r;
+                        $regBank->{$r} = $bank if $auto && defined $bank;
+                        warn "Cannot request a bank for a fixed register range: $fullName\n" if !$auto && defined $bank;
                     }
                 }
             }
@@ -1064,7 +1052,17 @@ sub setRegisterMap
                 {
                     # constrain potential range to vector alignment
                     my $end = $n + ($numList[$n] & 3 || $n == $#nameList-1 ? 1 : 3);
-                    $vectors->{$nameList[$n]} = [ @nameList[$n .. $end] ] if $end <= $#nameList;
+                    if ($end <= $#nameList)
+                    {
+                        $vectors->{$nameList[$n]} = [ @nameList[$n .. $end] ];
+                        #setup an alias for the base name without the number
+                        if (exists $aliases{$nameList[$n]} && !exists $regMap->{$aliases{$nameList[$n]}})
+                        {
+                            $regMap->{$aliases{$nameList[$n]}}  = $regMap->{$nameList[$n]};
+                            $vectors->{$aliases{$nameList[$n]}} = $vectors->{$nameList[$n]};
+                            delete $aliases{$nameList[$n]};
+                        }
+                    }
                 }
             }
         }
@@ -1123,14 +1121,10 @@ sub registerHealth
 
     my (@banks, @conflicts);
 
-    foreach my $slot (map $_, qw(r8 r20 r39 r39a))
+    foreach my $slot (qw(r8 r20 r39))
     {
         my $r = $capData->{$slot} or next;
         next if $r eq 'RZ';
-
-        # for when r39 is actually r20 when a constant is at c39 (messy).
-        $slot = 'r20' if $slot eq 'r39' & exists $capData->{c39};
-        $slot = 'r39' if $slot eq 'r39a';
 
         my $slotHist = $reuseHistory->{$slot} ||= {};
 

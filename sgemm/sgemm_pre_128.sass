@@ -13,20 +13,20 @@
 #   8:0x160:4:4 param_D // for diagnostic printf output
 #
 # Globals:
-#   c[0x0][0x160]: texA (the value is 1)
-#   c[0x0][0x164]: texB (the value is 0)
+#   c[0x0][0x164]: texA (the value is 1)
+#   c[0x0][0x168]: texB (the value is 0)
 
 <REGISTER_MAPPING>
 
     // Temporary registers to calculate the state registers. Reuse the C output registers.
     // These can be dynamically allocated (~) in the available registger space to elimiate any register bank conflicts.
-    0-63    ~ blk, ldx, ldx2, ldx4, k, tid1, tid4, tid7, tid31_4, xmad_t0, xmad_end
+    0-63    ~ blk, ldx, ldx2, ldx4, k, tid1, tid4, tid7, tid31_4, xmad_t0, xmad_end, bxOrig, byOrig, loy
 
     // Aliases for the C registers we use for initializing C (used as vectors)
     0-63    : cz<00-63>
 
     // The offset we store our zero value for initializing C. Reuse a register from the second blocking registers
-    80      : zOffset
+    //80      : zOffset
 
     // 64 C maxtrix output registers.
     // Use special mapping to avoid register bank conflicts between these registers and the blocking registers.
@@ -50,10 +50,11 @@
     // Key global state registers for main loop and some we reuse for outputing C.
     // Note, tweaking the register banks of track<0|4>, tex, writeS, readBs, readAs impacts performance because of
     // delayed bank conflicts between memory operations and ffmas.
-    104-127 ~ track<0|4>[0], tex[1], ldx8[1], readAs[2], readBs[3], writeS[2], end, tid, bx, by, tid31, tid96, tid128
+    // The array index bracket notation can be used to request a bank in a dynamically allocated range.
+    104-127 ~ track<0|4>[0], tex[2], readAs[2], readBs[3], writeS[3], end, ldx8, tid, bx, by, tid31, tid96, tid128, zOffset //, clock, smId, nSMs
 
     // Registers to store the results back to global memory. Reuse any register not needed after the main loop.
-    // Statically allocate cs0-7 because they're vector reegisters.
+    // Statically allocate cs0-7 because they're vector registers.
     64-71   : cs<0-7>
 
     // dynamically allocated C output registers(~)
@@ -65,11 +66,22 @@
 // No idea why ptxas does that anyway when it's not used for register spilling.
 // Such a waste of a perfectly good register.
 
+//gridDim.x  c[0x0][0x14]
+//gridDim.y  c[0x0][0x18]
+//gridDim.z  c[0x0][0x1c]
+
+
 // Scheduler doesn't handle the dependency flags yet,
 // so move these first instructions outside the block that's auto scheduled
+//--:-:-:-:1      CS2R clock, SR_CLOCKLO;
+//--:-:-:-:1      S2R smId, SR_VIRTID;
+//--:-:-:-:1      S2R nSMs, SR_VIRTCFG;
 --:-:1:-:1      S2R tid, SR_TID.X;   // Set Dep 1
 --:-:2:-:1      S2R bx,  SR_CTAID.X; // Set Dep 2
 --:-:3:-:1      S2R by,  SR_CTAID.Y; // Set Dep 3
+//--:-:2:-:1      S2R bxOrig,  SR_CTAID.X; // Set Dep 2
+//--:-:3:-:1      S2R byOrig,  SR_CTAID.Y; // Set Dep 3
+//--:-:4:-:1      FLO.U32 loy, c[0x0][0x18];
 
 // Instructions in a SCHEDULE_BLOCK are automatically reordered and appropriately stalled for simple dependancies
 // Memory dependencies are left up to the auther to deal with manually for now.
@@ -112,33 +124,33 @@
 --:-:2:Y:5      TLD.B.LZ.P loadX4, track4, tex, 0x0, 1D, 0xf; // Set Dep 2
 --:-:-:-:1      XMAD.PSL.CBCC end, k.H1, xmad_end.H1, end;
 
+// Initialize C registeres to zero
+// Using LDS.U.128 is a neat trick to save a few clock cyles
+// (when you have enough warps to hide the latency.)
+--:-:3:-:1      LDS.U.128 cz00, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz04, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz08, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz12, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz16, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz20, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz24, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz28, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz32, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz36, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz40, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz44, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz48, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz52, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz56, [zOffset + 4x<16*128>];
+--:-:3:-:1      LDS.U.128 cz60, [zOffset + 4x<16*128>];
+
 // These instuctions need to occur after the textures load so put them in a new block
 // that starts with a dependency barrier wait.
 01:-:-:-:1      STS.128 [writeS + 4x<0*128>], loadX0; // Wait Dep 1
 --:-:-:-:0      IADD track0, track0, ldx8;
 02:-:-:-:1      STS.128 [writeS + 4x<4*128>], loadX4; // Wait Dep 2
 --:-:-:-:0      IADD track4, track4, ldx8;
---:-:-:-:5      BAR.SYNC 0;
-
-// Initialize C registeres to zero
-// Using LDS.U.128 is a neat trick to save a few clock cyles
-// (when you have enough warps to hide the latency.)
---:-:-:-:1      LDS.U.128 cz00, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz04, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz08, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz12, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz16, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz20, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz24, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz28, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz32, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz36, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz40, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz44, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz48, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz52, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz56, [zOffset + 4x<16*128>];
---:-:-:-:1      LDS.U.128 cz60, [zOffset + 4x<16*128>];
+04:-:-:-:5      BAR.SYNC 0;
 
 // The next store to shared goes to high area.
 // Having 2 share buffers allows us to eliminate a bar.sync in the main loop.
@@ -170,10 +182,20 @@
 // bra:  1  dual issued
 // Total: 524 (512/518 = 98.8% FFMA)
 
+// Memory Throughput Upper Bound:
+// 2 * 4 * 4 bytes per thread per 518 clocks
+// 128 threads per SM
+// 16 SM's (GM204)
+// 1640Mhz (boost overclock)
+// .931 GiB/GB  (1000^3 / 1024^3)
+// 193 GiB/sec
+// Available: 224 GiB/sec (or 256 GiB/sec overclocked at 8GHz)
+
 LOOP:
 
 // Loop end condition
 --:-:-:-:1      ISETP.LE.AND P0, PT, track0, end, PT;
+
 01:-:-:-:0      FFMA cx02y00, j0Ax02, j0By00, cx02y00; // Wait Dep 1
 --:-:-:-:1      LDS.U.128 j1Ax00, [readAs + 4x<1*128 + 00>];
 --:-:-:-:1      FFMA cx02y01, j0Ax02, j0By01, cx02y01;
@@ -208,13 +230,13 @@ LOOP:
 --:-:-:-:1      FFMA cx01y02, j0Ax01, j0By02, cx01y02;
 --:-:-:-:1      FFMA cx02y02, j0Ax02, j0By02, cx02y02;
 --:-:-:-:1      FFMA cx02y03, j0Ax02, j0By03, cx02y03;
---:-:-:-:0      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
+--:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
+--:-:-:-:0      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
 --:-:2:-:1  @P0 TLD.B.LZ.P loadX0, track0, tex, 0x0, 1D, 0xf; // Set Dep 2
---:-:-:-:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
---:-:-:Y:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
---:-:-:-:1      FFMA cx02y65, j0Ax02, j0By65, cx02y65;
---:-:-:-:0      FFMA cx00y65, j0Ax00, j0By65, cx00y65;
+--:-:-:-:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
+--:-:-:-:0      FFMA cx02y65, j0Ax02, j0By65, cx02y65;
 --:-:3:-:1  @P0 TLD.B.LZ.P loadX4, track4, tex, 0x0, 1D, 0xf; // Set Dep 3
+--:-:-:-:1      FFMA cx00y65, j0Ax00, j0By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j0Ax00, j0By64, cx00y64;
 --:-:-:-:1      FFMA cx03y64, j0Ax03, j0By64, cx03y64;
 --:-:-:-:1      FFMA cx03y65, j0Ax03, j0By65, cx03y65;
@@ -280,7 +302,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
---:-:-:Y:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
+--:-:-:-:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j1Ax02, j1By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j1Ax00, j1By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j1Ax00, j1By64, cx00y64;
@@ -348,7 +370,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j0Ax02, j0By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
---:-:-:Y:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
+--:-:-:-:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j0Ax02, j0By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j0Ax00, j0By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j0Ax00, j0By64, cx00y64;
@@ -416,7 +438,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
---:-:-:Y:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
+--:-:-:-:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j1Ax02, j1By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j1Ax00, j1By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j1Ax00, j1By64, cx00y64;
@@ -484,7 +506,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j0Ax02, j0By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
---:-:-:Y:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
+--:-:-:-:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j0Ax02, j0By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j0Ax00, j0By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j0Ax00, j0By64, cx00y64;
@@ -552,7 +574,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
---:-:-:Y:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
+--:-:-:-:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j1Ax02, j1By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j1Ax00, j1By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j1Ax00, j1By64, cx00y64;
@@ -621,7 +643,7 @@ LOOP:
 --:-:-:-:0      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
 02:-:-:-:1  @P0 STS.128 [writeS + 4x<0*128>], loadX0; // Wait Dep 2
 --:-:-:-:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
---:-:-:Y:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
+--:-:-:-:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j0Ax02, j0By65, cx02y65;
 --:-:-:-:0      FFMA cx00y65, j0Ax00, j0By65, cx00y65;
 04:-:-:-:1  @P0 STS.128 [writeS + 4x<4*128>], loadX4; // Wait Dep 3
@@ -653,7 +675,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y66, j0Ax02, j0By66, cx02y66;
 --:-:-:-:1      FFMA cx02y67, j0Ax02, j0By67, cx02y67;
 --:-:-:-:0      FFMA cx00y67, j0Ax00, j0By67, cx00y67;
-01:-:-:-:5  @P0 BAR.SYNC 0;                            // Wait Dep 1
+01:-:-:-:5      BAR.SYNC 0;                            // Wait Dep 1
 --:-:-:-:1  @P0 LOP.XOR readAs, readAs, 4x<16*128>;
 --:-:-:-:1  @P0 LOP.XOR readBs, readBs, 4x<16*128>;
 --:-:-:-:1  @P0 LOP.XOR writeS, writeS, 4x<16*128>;
@@ -694,7 +716,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
---:-:-:Y:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
+--:-:-:-:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j1Ax02, j1By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j1Ax00, j1By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j1Ax00, j1By64, cx00y64;
@@ -870,6 +892,7 @@ LOOP:
 // Note, the SHFL instruction doesn't help us here because we're swaping different registers
 // from different threads.
 STORE_C:
+
 --:-:-:-:0      IADD cy00, cy00, 1;
 --:-:-:-:1      STS.128 [writeCs+4x<00>], cs0;
 --:-:-:-:0      IADD cy04, cy04, 1;

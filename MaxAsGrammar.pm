@@ -7,7 +7,8 @@ use Data::Dumper;
 our @ISA = qw(Exporter);
 
 our @EXPORT = qw(
-    %grammar %flags genCode genReuseCode
+    %grammar %flags
+    parseInstruct genCode genReuseCode
     processAsmLine processSassLine processSassCtrlLine
     replaceXMADs printCtrl readCtrl getVecRegisters
 );
@@ -24,7 +25,7 @@ sub getI
     # parse out our custom index immediates for addresses
     if ($val  =~ m'^(\d+)[xX]<([^>]+)>')
     {
-        # allow any perl expression and multiple result by leading decimal.
+        # allow any perl expression and multiply result by leading decimal.
         $val = $1 * eval $2;
     }
     # hexidecial value
@@ -105,8 +106,9 @@ my %operands =
     r0      => sub { getR($_[0], 0)  },
     r8      => sub { getR($_[0], 8)  },
     r20     => sub { getR($_[0], 20) },
+    r39s20  => sub { getR($_[0], 39) },
     r39     => sub { getR($_[0], 39) },
-    r39a    => sub { 0;              }, # does not modify op code, register must be in sequence with r20
+    r39a    => sub { getR($_[0], 39) }, # does not modify op code, xor the r39 value again to whipe it out, register must be in sequence with r20
     c20     => sub { getC($_[0])     },
     c39     => sub { getC($_[0])     },
     c34     => sub { hex($_[0]) << 34 },
@@ -151,9 +153,9 @@ my $r0      = qr"(?<r0>$reg)";
 my $r0cc    = qr"(?<r0>$reg)(?<CC>\.CC)?";
 my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1))?(?<reuse1>\.reuse)?";
 my $r20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r20>$reg)\|?(?:\.(?<r20part>H0|H1|B1|B2|B3))?(?<reuse2>\.reuse)?";
-my $r39s20  = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r39>$reg)\|?(?:\.(?<r39part>H0|H1))?(?<reuse2>\.reuse)?";
+my $r39s20  = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r39s20>(?<r20>$reg))\|?(?:\.(?<r39part>H0|H1))?(?<reuse2>\.reuse)?";
 my $r39     = qr"(?<r39neg>\-)?(?<r39>$reg)(?:\.(?<r39part>H0|H1))?(?<reuse3>\.reuse)?";
-my $r39a    = qr"(?<r39a>$reg)(?<reuse3>\.reuse)?";
+my $r39a    = qr"(?<r39a>(?<r39>$reg))(?<reuse3>\.reuse)?";
 my $c20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?c\[(?<c34>$hex)\]\s*\[(?<c20>$hex)\]\|?"o;
 my $c20s39  = qr"(?<r39neg>\-)?c\[(?<c34>$hex)\]\s*\[(?<c39>$hex)\]"o;
 my $f20w32  = qr"(?<f20w32>(?:\-|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))";
@@ -267,7 +269,7 @@ our %grammar =
     #Integer Instructions
     BFE       => [ { type => $shftT,  code => 0x5c00000000000000, rule => qr"^$pred?BFE\.U32 $r0, $r8, $icr20;"o,                         } ],
     BFI       => [ { type => $shftT,  code => 0x5bf0000000000000, rule => qr"^$pred?BFI $r0, $r8, $ir20, $cr39;"o,                        } ],
-    FLO       => [ { type => $x32T,   code => 0x5c30000000000000, rule => qr"^$pred?FLO\.U32 $r0, $icr20;"o,                              } ],
+    FLO       => [ { type => $s2rT,   code => 0x5c30000000000000, rule => qr"^$pred?FLO\.U32 $r0, $icr20;"o,                              } ],
     IADD      => [ { type => $x32T,   code => 0x5c10000000000000, rule => qr"^$pred?IADD$X $r0cc, $r8, $icr20;"o,                         } ],
     IADD32I   => [ { type => $x32T,   code => 0x1c00000000000000, rule => qr"^$pred?IADD32I $r0, $r8, $i20w32;"o,                         } ],
     IADD3     => [ { type => $x32T,   code => 0x5cc0000000000000, rule => qr"^$pred?IADD3$add3 $r0, $r8, $icr20, $r39;"o,                 } ],
@@ -289,7 +291,7 @@ our %grammar =
                    { type => $x32T,   code => 0x5be7000000000000, rule => qr"^$pred?LOP3\.LUT $r0, $r8, $r20, $r39, $i28w8;"o,            },
                    { type => $x32T,   code => 0x3c00000000000000, rule => qr"^$pred?LOP3\.LUT $r0, $r8, $i20, $r39, $i48w8;"o,            },
                  ],
-    POPC      => [ { type => $qtrT,   code => 0x5c08000000000000, rule => qr"^$pred?POPC $r0, $r20;"o,                                    } ],
+    POPC      => [ { type => $s2rT,   code => 0x5c08000000000000, rule => qr"^$pred?POPC $r0, $r20;"o,                                    } ],
     SHF       => [
                    { type => $shftT,  code => 0x5bf8000000000000, rule => qr"^$pred?SHF\.L$shf $r0, $r8, $ir20, $r39;"o,                  },
                    { type => $shftT,  code => 0x5cf8000000000000, rule => qr"^$pred?SHF\.R$shf $r0, $r8, $ir20, $r39;"o,                  },
@@ -878,6 +880,14 @@ foreach my $line (@flags)
     }
 }
 
+sub parseInstruct
+{
+	my ($inst, $grammar) = @_;
+	return unless $inst =~ $grammar->{rule};
+	my %capData = %+;
+	return \%capData;
+}
+
 # for immediate or constant operands and a given opcode, bits 56-63 get transformed
 my %immedOps = map { $_ => 1 } qw(i20 f20 d20);
 my %immedCodes =
@@ -957,8 +967,12 @@ sub genCode
         # if capture group is an operand then process and add that data to code
         if (exists $operands{$capture})
         {
-            $code ^= $operands{$capture}->($capData->{$capture});
-            push @$test, $capture if $test;
+            # don't process the r20 that comes with the r39s20 capture
+            unless ($capture eq 'r20' && exists $capData->{r39s20})
+            {
+				$code ^= $operands{$capture}->($capData->{$capture});
+				push @$test, $capture if $test;
+            }
         }
 
         # Add matching flags (an operand might also add/remove a flag)
@@ -1058,11 +1072,14 @@ sub replaceXMADs
 {
     my $file = shift;
 
-    # XMAD.LO d, a, b, c, x;
-    # ----------------------
-    # XMAD.MRG x, a, b.H1, RZ;
-    # XMAD d, a, b, c;
-    # XMAD.PSL.CBCC d, a.H1, x.H1, d;
+# XMAD.LO d, a, b, c, x;
+# ----------------------
+# XMAD.MRG x, a, b.H1, RZ;
+# XMAD d, a, b, c;
+# XMAD.PSL.CBCC d, a.H1, x.H1, d;
+# ----------------------
+# XMAD d, a, 0xffff, c;
+# XMAD.PSL.CBCC d, a.H1, 0xffff, d;
     $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?:(?<bi>-?$immed)|(?<br>\w+))\s*,\s*(?<c>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<x>\w+)\s*;$CommRe/
 
         my $replace;

@@ -2,10 +2,10 @@
 use strict;
 my %p;
 
-$p{N}         = 5120;
+$p{N}         = 8192;
 $p{blocking}  = 8;
 $p{unroll}    = 8;
-$p{threads}   = 256;   #256
+$p{threads}   = 64;   #256
 
 $p{csize}     = $p{blocking} * $p{blocking};
 $p{loopSize}  = $p{unroll} * $p{csize};
@@ -32,7 +32,7 @@ print `maxas.pl -i $fileName microbench.cubin`;
 
 exit if $?;
 
-my $data = `Release\\microbench.exe e $p{blocks} $p{threads} $p{fops} 100`;
+my $data = `Release\\microbench.exe e $p{blocks} $p{threads} $p{fops} 50`;
 
 my ($gflops) = $data =~ /GFLOPS: ([0-9]+)/ms;
 
@@ -70,15 +70,15 @@ sub writeSassFile
 
     100-101 : count, stop
 
-    110-112 : readAs, readBs, writeS
+    //102-112 ~ readAs, readBs, writeS
 
 </REGISTER_MAPPING>
 
 --:-:-:-:1      MOV count, RZ;
 --:-:-:-:1      MOV32I stop, %d;
---:-:-:-:1      MOV writeS, RZ;
---:-:-:-:1      MOV readAs, RZ;
---:-:-:-:1      MOV readBs, RZ;
+//--:-:-:-:1      MOV writeS, RZ;
+//--:-:-:-:1      MOV readAs, RZ;
+//--:-:-:-:1      MOV readBs, RZ;
 
 <CODE>
     return join '', map "--:-:-:-:1      MOV32I r$_, 1.0;\n", 0..95;
@@ -97,7 +97,7 @@ LOOP:
     #my @swirl = ([0,1],[0,0],[2,0],[2,1]);
     my @swirl = ([2,0],[2,1],[0,1],[0,0]);
     #my @swirl = ([0,1],[0,0],[1,0],[1,1]);
-    my @xVals = (1,0,65,64);
+    my @xVals = (0,1,64,65);
     #my @xVals = (0,2,64,66);
 
     my @yVals = (0,2,64,66);
@@ -116,28 +116,24 @@ LOOP:
         my $odd  = $j & 1;
         my $nOdd = !$odd + 0;
 
-        my %%insert = (
-            c0 => "--:-:-:-:1      LDS.U.128 j${nOdd}Ax00, [readAs+0x10];\n",
-            c2 => "--:-:-:-:1      LDS.U.128 j${nOdd}By00, [readBs+0x10];\n",
-            c4 => "--:-:-:-:1      LDS.U.128 j${nOdd}Ax64, [readAs+0x10];\n",
-            c6 => "--:-:1:-:1      LDS.U.128 j${nOdd}By64, [readBs+0x10];\n",
-        );
+		my %%insert;
+
+        #$insert{c62} = "01:-:-:-:5      BAR.SYNC 0;\n" if $j == 6;
 
         $insert{c62} =
-                "01:-:-:-:5      BAR.SYNC 0;                            // Wait Dep 1\n" .
                 "--:-:-:-:1      LOP.XOR readAs, readAs, 0;\n" .
                 "--:-:-:-:1      LOP.XOR readBs, readBs, 0;\n" .
                 "--:-:-:-:1      LOP.XOR readAs, readAs, 0;\n" .
                 "--:-:-:-:1      LOP.XOR readBs, readBs, 0;\n" .
-                "--:-:-:-:1      LOP.XOR writeS, writeS, 0;\n" if $j == 6;
+                "--:-:-:-:1      LOP.XOR writeS, writeS, 0;\n" if $j == 8;
 
         foreach my $c (0 .. 63)
         {
             my ($x,$y) = $cOrder[$c] =~ /^(x\d+)(y\d+)/;
             my $ins    = $insert{"c$c"} || '';
-            my $stall  = $ins || ($c == 63 && $j == 7) ? 0 : 1;
+            my $stall  = ($c == 63 && $j == 7) ? 0 : 1; #1; #$ins ||
             my $yield  = $c == 32 ? 'Y' : '-';
-            my $wait   = $c ? '--' : '01';
+            my $wait   = '--'; #$c ? '--' : '01';
 
             $out .= "$wait:-:-:$yield:$stall      FFMA c$cOrder[$c], j${odd}A$x, j${odd}B$y, c$cOrder[$c];\n$ins";
         }
@@ -154,3 +150,9 @@ END_SASS
 
 __END__
 
+        my %%insert = (
+            c0 => "--:-:-:-:1      LDS.U.128 j${nOdd}Ax00, [readAs+0x10];\n",
+            c2 => "--:-:-:-:1      LDS.U.128 j${nOdd}By00, [readBs+0x10];\n",
+            c4 => "--:-:-:-:1      LDS.U.128 j${nOdd}Ax64, [readAs+0x10];\n",
+            c6 => "--:-:1:-:1      LDS.U.128 j${nOdd}By64, [readBs+0x10];\n",
+        );
