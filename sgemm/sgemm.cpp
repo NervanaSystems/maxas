@@ -381,6 +381,7 @@ float cublasSgemm(const char* kernel, CUdeviceptr devC, CUdeviceptr devA, CUdevi
 	int blocks = gridX * gridY;
 
 	// Load the cubin
+	// See cublas_sgemm.ptx for info on how to build this.
 	CUmodule hModule;
 	CUDA_CHECK( cuModuleLoad(&hModule, "cublas_sgemm.cubin") );
 

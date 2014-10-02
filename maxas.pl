@@ -44,7 +44,10 @@ elsif ($mode =~ /^\-?\-t/i)
     # cubin file
     else
     {
-        open $fh, "cuobjdump.exe -arch sm_50 -sass $file |" or die "cuobjdump.exe -arch sm_50 -sass $file: $!";
+		my $cubin = Cubin->new($file);
+		my $arch  = $cubin->arch;
+
+        open $fh, "cuobjdump.exe -arch sm_$arch -sass $file |" or die "cuobjdump.exe -arch sm_$arch -sass $file: $!";
         my $first = <$fh>;
         if ($first =~ /cuobjdump fatal/)
         {
