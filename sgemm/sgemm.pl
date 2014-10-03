@@ -24,10 +24,10 @@ if (!-f 'sgemm_pre_64.sass' || (stat 'sgemm64.sass')[9] > (stat 'sgemm_pre_64.sa
 
 #print `Release\\sgemm.exe $_ 20` foreach (80,60,40,30,20,10,9,8,7,6,5,4,3,2);
 
-`Release\\sgemm.exe 64 50 $CU_AD_FORMAT_FLOAT`;
+`Release\\sgemm.exe 64 5 $CU_AD_FORMAT_FLOAT`;
 
-#print `Release\\sgemm.exe 32 20 $CU_AD_FORMAT_FLOAT`;
-#exit;
+print `Release\\sgemm.exe 64 20 $CU_AD_FORMAT_UNSIGNED_INT8`;
+exit;
 
 my %data;
 foreach my $thread128 (4 .. 64)

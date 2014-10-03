@@ -1,7 +1,7 @@
 # Kernel: sgemm_kernel_128
 # Arch: sm_50
 # InsCnt: 770
-# RegCnt: 119
+# RegCnt: 118
 # SharedSize: 16384
 # BarCnt: 1
 # Params(9):
@@ -31,12 +31,12 @@
 --:-:-:-:1      SHL R16, R117, 0x4;
 --:-:-:-:1      LOP.AND R0, R112.reuse, 0x1;
 --:-:-:-:1      IADD R13, R13, -0x8;
---:-:-:-:1      LOP.AND R118, R112.reuse, -0x20;
+--:-:-:-:1      LOP.AND R80, R112.reuse, -0x20;
 --:-:-:-:1      SHR.U32 R106, R115, 0x4;
 --:-:-:-:1      LOP.AND R116, R112, 0x60;
 --:-:-:-:1      SHR.U32 R107, R107, 0x3;
 --:-:-:-:0 @!P0 MOV R1, c[0x0][0x150];
---:-:-:-:1      STS.128 [R118+0x2000], RZ;
+--:-:-:-:1      STS.128 [R80+0x2000], RZ;
 --:-:-:-:1  @P0 MOV R1, c[0x0][0x154];
 --:-:-:-:1      ISCADD R111, R9, R16, 0x9;
 06:-:-:-:1      SEL R12, R114, R113, P0;
@@ -59,22 +59,22 @@
 --:-:-:-:1      XMAD R105, R13.reuse, R8, R104;
 --:-:2:Y:5      TLD.B.LZ.P R100, R108, R110, 0x0, 1D, 0xf;
 --:-:-:-:1      XMAD.PSL.CBCC R105, R13.H1, R20.H1, R105;
---:-:3:-:1      LDS.U.128 R0, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R4, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R8, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R12, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R16, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R20, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R24, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R28, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R32, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R36, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R40, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R44, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R48, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R52, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R56, [R118+0x2000];
---:-:3:-:1      LDS.U.128 R60, [R118+0x2000];
+--:-:3:-:1      LDS.U.128 R0, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R4, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R8, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R12, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R16, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R20, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R24, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R28, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R32, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R36, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R40, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R44, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R48, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R52, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R56, [R80+0x2000];
+--:-:3:-:1      LDS.U.128 R60, [R80+0x2000];
 01:-:-:-:1      STS.128 [R111], R96;
 --:-:-:-:0      IADD R104, R104, R109.reuse;
 02:-:-:-:1      STS.128 [R111+0x800], R100;
@@ -124,7 +124,7 @@ TARGET1:
 --:-:-:-:1      FFMA R10, R64.reuse, R75, R10;
 --:-:-:-:0      FFMA R11, R64.reuse, R74, R11;
 --:-:2:-:1  @P0 TLD.B.LZ.P R96, R104, R110, 0x0, 1D, 0xf;
---:-:-:-:1      FFMA R17, R66.reuse, R76.reuse, R17;
+--:-:-:Y:1      FFMA R17, R66.reuse, R76.reuse, R17;
 --:-:-:-:0      FFMA R16, R66, R77.reuse, R16;
 --:-:3:-:1  @P0 TLD.B.LZ.P R100, R108, R110, 0x0, 1D, 0xf;
 --:-:-:-:1      FFMA R18, R64.reuse, R77.reuse, R18;
@@ -193,7 +193,7 @@ TARGET1:
 --:-:-:-:1      FFMA R8, R82.reuse, R91.reuse, R8;
 --:-:-:-:1      FFMA R10, R80.reuse, R91, R10;
 --:-:-:-:1      FFMA R11, R80.reuse, R90, R11;
---:-:-:-:1      FFMA R17, R82.reuse, R92.reuse, R17;
+--:-:-:Y:1      FFMA R17, R82.reuse, R92.reuse, R17;
 --:-:-:-:1      FFMA R16, R82, R93.reuse, R16;
 --:-:-:-:1      FFMA R18, R80.reuse, R93.reuse, R18;
 --:-:-:-:1      FFMA R19, R80, R92.reuse, R19;
@@ -261,7 +261,7 @@ TARGET1:
 --:-:-:-:1      FFMA R8, R66.reuse, R75.reuse, R8;
 --:-:-:-:1      FFMA R10, R64.reuse, R75, R10;
 --:-:-:-:1      FFMA R11, R64.reuse, R74, R11;
---:-:-:-:1      FFMA R17, R66.reuse, R76.reuse, R17;
+--:-:-:Y:1      FFMA R17, R66.reuse, R76.reuse, R17;
 --:-:-:-:1      FFMA R16, R66, R77.reuse, R16;
 --:-:-:-:1      FFMA R18, R64.reuse, R77.reuse, R18;
 --:-:-:-:1      FFMA R19, R64, R76.reuse, R19;
@@ -329,7 +329,7 @@ TARGET1:
 --:-:-:-:1      FFMA R8, R82.reuse, R91.reuse, R8;
 --:-:-:-:1      FFMA R10, R80.reuse, R91, R10;
 --:-:-:-:1      FFMA R11, R80.reuse, R90, R11;
---:-:-:-:1      FFMA R17, R82.reuse, R92.reuse, R17;
+--:-:-:Y:1      FFMA R17, R82.reuse, R92.reuse, R17;
 --:-:-:-:1      FFMA R16, R82, R93.reuse, R16;
 --:-:-:-:1      FFMA R18, R80.reuse, R93.reuse, R18;
 --:-:-:-:1      FFMA R19, R80, R92.reuse, R19;
@@ -397,7 +397,7 @@ TARGET1:
 --:-:-:-:1      FFMA R8, R66.reuse, R75.reuse, R8;
 --:-:-:-:1      FFMA R10, R64.reuse, R75, R10;
 --:-:-:-:1      FFMA R11, R64.reuse, R74, R11;
---:-:-:-:1      FFMA R17, R66.reuse, R76.reuse, R17;
+--:-:-:Y:1      FFMA R17, R66.reuse, R76.reuse, R17;
 --:-:-:-:1      FFMA R16, R66, R77.reuse, R16;
 --:-:-:-:1      FFMA R18, R64.reuse, R77.reuse, R18;
 --:-:-:-:1      FFMA R19, R64, R76.reuse, R19;
@@ -465,7 +465,7 @@ TARGET1:
 --:-:-:-:1      FFMA R8, R82.reuse, R91.reuse, R8;
 --:-:-:-:1      FFMA R10, R80.reuse, R91, R10;
 --:-:-:-:1      FFMA R11, R80.reuse, R90, R11;
---:-:-:-:1      FFMA R17, R82.reuse, R92.reuse, R17;
+--:-:-:Y:1      FFMA R17, R82.reuse, R92.reuse, R17;
 --:-:-:-:1      FFMA R16, R82, R93.reuse, R16;
 --:-:-:-:1      FFMA R18, R80.reuse, R93.reuse, R18;
 --:-:-:-:1      FFMA R19, R80, R92.reuse, R19;
@@ -534,7 +534,7 @@ TARGET1:
 --:-:-:-:0      FFMA R10, R64.reuse, R75, R10;
 02:-:-:-:1  @P0 STS.128 [R111], R96;
 --:-:-:-:1      FFMA R11, R64.reuse, R74, R11;
---:-:-:-:1      FFMA R17, R66.reuse, R76.reuse, R17;
+--:-:-:Y:1      FFMA R17, R66.reuse, R76.reuse, R17;
 --:-:-:-:1      FFMA R16, R66, R77.reuse, R16;
 --:-:-:-:0      FFMA R18, R64.reuse, R77.reuse, R18;
 04:-:-:-:1  @P0 STS.128 [R111+0x800], R100;
@@ -607,7 +607,7 @@ TARGET1:
 --:-:-:-:1      FFMA R8, R82.reuse, R91.reuse, R8;
 --:-:-:-:1      FFMA R10, R80.reuse, R91, R10;
 --:-:-:-:1      FFMA R11, R80.reuse, R90, R11;
---:-:-:-:1      FFMA R17, R82.reuse, R92.reuse, R17;
+--:-:-:Y:1      FFMA R17, R82.reuse, R92.reuse, R17;
 --:-:-:-:1      FFMA R16, R82, R93.reuse, R16;
 --:-:-:-:1      FFMA R18, R80.reuse, R93.reuse, R18;
 --:-:-:-:1      FFMA R19, R80, R92.reuse, R19;

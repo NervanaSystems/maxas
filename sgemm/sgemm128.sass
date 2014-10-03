@@ -66,11 +66,6 @@
 // No idea why ptxas does that anyway when it's not used for register spilling.
 // Such a waste of a perfectly good register.
 
-//gridDim.x  c[0x0][0x14]
-//gridDim.y  c[0x0][0x18]
-//gridDim.z  c[0x0][0x1c]
-
-
 // Scheduler doesn't handle the dependency flags yet,
 // so move these first instructions outside the block that's auto scheduled
 //--:-:-:-:1      CS2R clock, SR_CLOCKLO;

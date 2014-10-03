@@ -26,7 +26,7 @@
     0-63    : cz<00-63>
 
     // The offset we store our zero value for initializing C. Reuse a register from the second blocking registers
-    //80      : zOffset
+    80      : zOffset
 
     // 64 C maxtrix output registers.
     // Use special mapping to avoid register bank conflicts between these registers and the blocking registers.
@@ -51,7 +51,7 @@
     // Note, tweaking the register banks of track<0|4>, tex, writeS, readBs, readAs impacts performance because of
     // delayed bank conflicts between memory operations and ffmas.
     // The array index bracket notation can be used to request a bank in a dynamically allocated range.
-    104-127 ~ track<0|4>[0], tex[2], readAs[2], readBs[3], writeS[3], end, ldx8, tid, bx, by, tid31, tid96, tid128, zOffset //, clock, smId, nSMs
+    104-127 ~ track<0|4>[0], tex[2], readAs[2], readBs[3], writeS[3], end, ldx8, tid, bx, by, tid31, tid96, tid128 //, clock, smId, nSMs
 
     // Registers to store the results back to global memory. Reuse any register not needed after the main loop.
     // Statically allocate cs0-7 because they're vector registers.
@@ -66,11 +66,6 @@
 // No idea why ptxas does that anyway when it's not used for register spilling.
 // Such a waste of a perfectly good register.
 
-//gridDim.x  c[0x0][0x14]
-//gridDim.y  c[0x0][0x18]
-//gridDim.z  c[0x0][0x1c]
-
-
 // Scheduler doesn't handle the dependency flags yet,
 // so move these first instructions outside the block that's auto scheduled
 //--:-:-:-:1      CS2R clock, SR_CLOCKLO;
@@ -79,9 +74,6 @@
 --:-:1:-:1      S2R tid, SR_TID.X;   // Set Dep 1
 --:-:2:-:1      S2R bx,  SR_CTAID.X; // Set Dep 2
 --:-:3:-:1      S2R by,  SR_CTAID.Y; // Set Dep 3
-//--:-:2:-:1      S2R bxOrig,  SR_CTAID.X; // Set Dep 2
-//--:-:3:-:1      S2R byOrig,  SR_CTAID.Y; // Set Dep 3
-//--:-:4:-:1      FLO.U32 loy, c[0x0][0x18];
 
 // Instructions in a SCHEDULE_BLOCK are automatically reordered and appropriately stalled for simple dependancies
 // Memory dependencies are left up to the auther to deal with manually for now.
@@ -233,7 +225,7 @@ LOOP:
 --:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
 --:-:-:-:0      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
 --:-:2:-:1  @P0 TLD.B.LZ.P loadX0, track0, tex, 0x0, 1D, 0xf; // Set Dep 2
---:-:-:-:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
+--:-:-:Y:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
 --:-:-:-:0      FFMA cx02y65, j0Ax02, j0By65, cx02y65;
 --:-:3:-:1  @P0 TLD.B.LZ.P loadX4, track4, tex, 0x0, 1D, 0xf; // Set Dep 3
 --:-:-:-:1      FFMA cx00y65, j0Ax00, j0By65, cx00y65;
@@ -302,7 +294,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
---:-:-:-:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
+--:-:-:Y:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j1Ax02, j1By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j1Ax00, j1By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j1Ax00, j1By64, cx00y64;
@@ -370,7 +362,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j0Ax02, j0By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
---:-:-:-:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
+--:-:-:Y:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j0Ax02, j0By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j0Ax00, j0By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j0Ax00, j0By64, cx00y64;
@@ -438,7 +430,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
---:-:-:-:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
+--:-:-:Y:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j1Ax02, j1By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j1Ax00, j1By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j1Ax00, j1By64, cx00y64;
@@ -506,7 +498,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j0Ax02, j0By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
---:-:-:-:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
+--:-:-:Y:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j0Ax02, j0By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j0Ax00, j0By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j0Ax00, j0By64, cx00y64;
@@ -574,7 +566,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
---:-:-:-:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
+--:-:-:Y:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j1Ax02, j1By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j1Ax00, j1By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j1Ax00, j1By64, cx00y64;
@@ -643,7 +635,7 @@ LOOP:
 --:-:-:-:0      FFMA cx00y03, j0Ax00, j0By03, cx00y03;
 02:-:-:-:1  @P0 STS.128 [writeS + 4x<0*128>], loadX0; // Wait Dep 2
 --:-:-:-:1      FFMA cx00y02, j0Ax00, j0By02, cx00y02;
---:-:-:-:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
+--:-:-:Y:1      FFMA cx02y64, j0Ax02, j0By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j0Ax02, j0By65, cx02y65;
 --:-:-:-:0      FFMA cx00y65, j0Ax00, j0By65, cx00y65;
 04:-:-:-:1  @P0 STS.128 [writeS + 4x<4*128>], loadX4; // Wait Dep 3
@@ -716,7 +708,7 @@ LOOP:
 --:-:-:-:1      FFMA cx02y03, j1Ax02, j1By03, cx02y03;
 --:-:-:-:1      FFMA cx00y03, j1Ax00, j1By03, cx00y03;
 --:-:-:-:1      FFMA cx00y02, j1Ax00, j1By02, cx00y02;
---:-:-:-:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
+--:-:-:Y:1      FFMA cx02y64, j1Ax02, j1By64, cx02y64;
 --:-:-:-:1      FFMA cx02y65, j1Ax02, j1By65, cx02y65;
 --:-:-:-:1      FFMA cx00y65, j1Ax00, j1By65, cx00y65;
 --:-:-:-:1      FFMA cx00y64, j1Ax00, j1By64, cx00y64;
