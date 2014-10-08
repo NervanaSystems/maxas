@@ -589,21 +589,72 @@
 .visible .entry special3(
     .param .u32 .ptr.global.align 4 param_out32,
     .param .s16 param_s16,
-    .param .s32 param_s32
+    .param .s32 param_s32,
+    .param .u32 param_u32
 )
 {
     .reg .u32 out32;
     .reg .s16 var16;
     .reg .s32 var32;
+    .reg .u32 vur32;
 
     ld.param.s16 var16, [param_s16];
     ld.param.s32 var32, [param_s32];
+    ld.param.u32 vur32, [param_u32];
     ld.param.u32 out32, [param_out32];
 
     //mad.wide.s16 var32, var16, var16, var32;
-    mad.lo.s16 var16, var16, 13, var16;
+    //mad.lo.s16 var16, var16, var16, var16;
 
-    st.global.s16 [out32+0], var16;
+    //vmad.s32.s32.s32 var32, var32.h0, var32.h1, var32;
+    vmad.s32.s32.s32 var32, var32.h0, var32.h0, var32;
+    vmad.s32.s32.s32 var32, var32.h1, var32.h0, var32;
+    vmad.s32.s32.s32 var32, var32.h0, var32.h1, var32;
+    vmad.s32.s32.s32 var32, -var32.h0, var32.h0, var32;
+    vmad.s32.s32.s32 var32, var32.h0, -var32.h0, var32;
+    vmad.s32.s32.s32 var32, var32.h0, var32.h0, -var32;
+
+    vmad.s32.s32.s32 var32, var32.b0, var32.b0, var32;
+    vmad.s32.s32.s32 var32, var32.b1, var32.b0, var32;
+    vmad.s32.s32.s32 var32, var32.b0, var32.b1, var32;
+    vmad.s32.s32.s32 var32, var32.b2, var32.b0, var32;
+    vmad.s32.s32.s32 var32, var32.b0, var32.b2, var32;
+    vmad.s32.s32.s32 var32, var32.b3, var32.b0, var32;
+    vmad.s32.s32.s32 var32, var32.b0, var32.b3, var32;
+
+    vmad.u32.u32.u32 vur32, vur32.b0, vur32.h0, vur32;
+    vmad.u32.u32.u32 vur32, vur32.h0, vur32.b0, vur32;
+
+    vmad.u32.u32.u32 vur32, vur32.h0, vur32.h0, vur32;
+    vmad.u32.u32.u32 vur32, vur32.h1, vur32.h0, vur32;
+    vmad.u32.u32.u32 vur32, vur32.h0, vur32.h1, vur32;
+    vmad.u32.u32.u32 vur32, -vur32.b0, vur32.b0, vur32;
+    vmad.u32.u32.u32 vur32, vur32.b0, -vur32.b0, vur32;
+    vmad.u32.u32.u32 vur32, vur32.b0, vur32.b0, -vur32;
+
+    vmad.u32.u32.u32 vur32, vur32.b0, vur32.b0, vur32;
+    vmad.u32.u32.u32 vur32, vur32.b1, vur32.b0, vur32;
+    vmad.u32.u32.u32 vur32, vur32.b0, vur32.b1, vur32;
+    vmad.u32.u32.u32 vur32, vur32.b2, vur32.b0, vur32;
+    vmad.u32.u32.u32 vur32, vur32.b0, vur32.b2, vur32;
+    vmad.u32.u32.u32 vur32, vur32.b3, vur32.b0, vur32;
+    vmad.u32.u32.u32 vur32, vur32.b0, vur32.b3, vur32;
+
+    vmad.s32.s32.u32 var32, var32.b0, vur32.b0, var32;
+	vmad.s32.u32.s32 var32, vur32.b0, var32.b0, var32;
+
+    vmad.s32.s32.u32 var32, var32.h0, vur32.h0, var32;
+	vmad.s32.u32.s32 var32, vur32.h0, var32.h0, var32;
+
+	vmad.u32.u32.u32.sat vur32, vur32.b0, vur32.b0, vur32;
+	vmad.u32.u32.u32.shr7 vur32, vur32.b0, vur32.b0, vur32;
+	vmad.u32.u32.u32.shr15 vur32, vur32.b0, vur32.b0, vur32;
+	vmad.u32.u32.u32.po vur32, vur32.b0, vur32.b0, vur32;
+	vmad.u32.u32.u32.po.sat.shr7 vur32, vur32.b0, vur32.b0, vur32;
+	vmad.u32.u32.u32.sat.shr15 vur32, vur32.b0, vur32.b0, vur32;
+
+    st.global.s32 [out32+0], var32;
+    st.global.u32 [out32+4], vur32;
     ret;
 }
 

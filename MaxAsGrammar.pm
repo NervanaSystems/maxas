@@ -151,7 +151,7 @@ my $p48     = qr"(?<p48>$p)"o;
 my $p58     = qr"(?<p58>$p)"o;
 my $r0      = qr"(?<r0>$reg)";
 my $r0cc    = qr"(?<r0>$reg)(?<CC>\.CC)?";
-my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1))?(?<reuse1>\.reuse)?";
+my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1|B1|B2|B3))?(?<reuse1>\.reuse)?";
 my $r20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r20>$reg)\|?(?:\.(?<r20part>H0|H1|B1|B2|B3))?(?<reuse2>\.reuse)?";
 my $r39s20  = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r39s20>(?<r20>$reg))\|?(?:\.(?<r39part>H0|H1))?(?<reuse2>\.reuse)?";
 my $r39     = qr"(?<r39neg>\-)?(?<r39>$reg)(?:\.(?<r39part>H0|H1))?(?<reuse3>\.reuse)?";
@@ -202,6 +202,8 @@ my $tld   = qr"(?<reuse1>T)|(?<reuse2>P)";
 my $sr    = qr"SR_(?<sr>\S+)";
 my $shf   = qr"(?<W>\.W)?(?:\.(?<type>U64|S64))?(?<HI>\.HI)?";
 my $xmad  = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<mode>MRG|PSL|CHI|CLO|CSFU))?(?<CBCC>\.CBCC)?";
+my $vmad8 = qr"\.(?<sign1>[SU])(?<size1>8|16)\.(?<sign2>[SU])(?<size2>8|16)(?<PO>\.PO)?(?<SHR_7>\.SHR_7)?(?<SHR_15>\.SHR_15)?(?<SAT>\.SAT)?";
+my $vmad16= qr"\.(?<sign1>[SU])(?<size1>16)\.(?<sign2>[SU])(?<size2>16)(?<PO>\.PO)?(?<SHR_7>\.SHR_7)?(?<SHR_15>\.SHR_15)?(?<SAT>\.SAT)?";
 my $x2x   = qr"\.(?<destSign>F|U|S)(?<destWidth>8|16|32|64)\.(?<srcSign>F|U|S)(?<srcWidth>8|16|32|64)";
 my $prmt  = qr"(?:\.(?<mode>F4E|B4E|RC8|ECL|ECR|RC16))?";
 my $shfl  = qr"\.(?<mode>IDX|UP|DOWN|BFLY)";
@@ -209,7 +211,6 @@ my $bar   = qr"\.(?<mode>SYNC|ARV|RED)(?:\.(?<red>POPC|AND|OR))? (?:$i8w4|$r8)(?
 my $b2r   = qr"\.RESULT $r0(?:, $p45|(?<nop45>))"o;
 my $dbar  = qr" {(?<db5>5)?,?(?<db4>4)?,?(?<db3>3)?,?(?<db2>2)?,?(?<db1>1)?,?(?<db0>0)?}";
 my $mbar  = qr"\.(?<mode>CTA|GL|SYS)";
-my $iAddr = qr"";
 my $addr  = qr"\[(?:(?<r8>$reg)|(?<nor8>))(?:\s*\+?\s*$i20w24)?\]"o;
 my $addr2 = qr"\[(?:(?<r8>$reg)|(?<nor8>))(?:\s*\+?\s*$i28w20)?\]"o;
 my $ldc   = qr"c\[(?<c36>$hex)\]\s*$addr"o;
@@ -221,6 +222,7 @@ my $memCache = qr"(?<E>\.E)?(?<U>\.U)?(?:\.(?<cache>CG|CI|CS|CV|IL|WT))?";
 # class: hardware resource that shares characteristics with types
 # lat  : pipeline depth where relevent, placeholder for memory ops
 # blat : barrier latency, typical fetch time for memory operations. Highly variable.
+# rlat : operand read latency for memory ops
 # rhold: clock cycles that a memory op typically holds onto a register before it's free to be written by another op.
 # tput : throughput, clock cycles an op takes when two ops of the same class are issued in succession.
 # dual : whether this instruction type can be dual issued
@@ -399,7 +401,12 @@ our %grammar =
     #Video Instructions... TODO
     # Quick and dirty VADD for now.  Just added to get 100% cublas_device.lib coverage.
     VADD   => [ { type => $x32T, code => 0x2044004040000000, rule => qr"^$pred?VADD\.U16\.U16\.MRG_16H $r0, $r8, $r20, $r39;"o, } ], #Partial
+    VMAD   => [
+                { type => $shftT, code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad16 $r0, $r8, $r20, $r39;"o, },
+                { type => $x32T,  code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad8 $r0, $r8, $r20, $r39;"o, },
+              ],
 );
+
 
 # Create map of capture groups to op code flags that need to be added (or removed)
 my @flags = grep /\S/, split "\n", q{;
@@ -514,6 +521,42 @@ XMAD: r20part
 
 XMAD: r39part
 0x0010000000000000 H1
+
+VMAD: r8part
+0x0000001000000000 B1
+0x0000002000000000 B2
+0x0000003000000000 B3
+0x0000001000000000 H1
+
+VMAD: r20part
+0x0000000010000000 B1
+0x0000000020000000 B2
+0x0000000030000000 B3
+0x0000000010000000 H1
+
+VMAD
+0x0040000000000000 r8neg
+0x0020000000000000 r39neg
+0x0008000000000000 SHR_7
+0x0010000000000000 SHR_15
+0x0060000000000000 PO
+0x0080000000000000 SAT
+
+VMAD: sign1
+0x0000000000000000 U
+0x0001000000000000 S
+
+VMAD: sign2
+0x0000000000000000 U
+0x0002000000000000 S
+
+VMAD: size1
+0x0000000000000000 8
+0x0000004000000000 16
+
+VMAD: size2
+0x0000000000000000 8
+0x0000000040000000 16
 
 IADD3: type
 0x0001000000000000 X
@@ -880,10 +923,10 @@ foreach my $line (@flags)
 
 sub parseInstruct
 {
-	my ($inst, $grammar) = @_;
-	return unless $inst =~ $grammar->{rule};
-	my %capData = %+;
-	return \%capData;
+    my ($inst, $grammar) = @_;
+    return unless $inst =~ $grammar->{rule};
+    my %capData = %+;
+    return \%capData;
 }
 
 # for immediate or constant operands and a given opcode, bits 56-63 get transformed
@@ -968,8 +1011,8 @@ sub genCode
             # don't process the r20 that comes with the r39s20 capture
             unless ($capture eq 'r20' && exists $capData->{r39s20})
             {
-				$code ^= $operands{$capture}->($capData->{$capture});
-				push @$test, $capture if $test;
+                $code ^= $operands{$capture}->($capData->{$capture});
+                push @$test, $capture if $test;
             }
         }
 
