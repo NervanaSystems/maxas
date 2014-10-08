@@ -402,8 +402,8 @@ our %grammar =
     # Quick and dirty VADD for now.  Just added to get 100% cublas_device.lib coverage.
     VADD   => [ { type => $x32T, code => 0x2044004040000000, rule => qr"^$pred?VADD\.U16\.U16\.MRG_16H $r0, $r8, $r20, $r39;"o, } ], #Partial
     VMAD   => [
-                { type => $shftT, code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad16 $r0, $r8, $r20, $r39;"o, },
-                { type => $x32T,  code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad8 $r0, $r8, $r20, $r39;"o, },
+                { type => $x32T,  code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad16 $r0, $r8, $r20, $r39;"o, },
+                { type => $shftT, code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad8 $r0, $r8, $r20, $r39;"o, },
               ],
 );
 
