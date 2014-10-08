@@ -269,7 +269,7 @@ our %grammar =
     FSWZADD  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?FSWZADD[^;]*;"o,                                    } ], #TODO
 
     #Integer Instructions
-    BFE       => [ { type => $shftT,  code => 0x5c00000000000000, rule => qr"^$pred?BFE\.U32 $r0, $r8, $icr20;"o,                         } ],
+    BFE       => [ { type => $shftT,  code => 0x5c01000000000000, rule => qr"^$pred?BFE$u32 $r0, $r8, $icr20;"o,                         } ],
     BFI       => [ { type => $shftT,  code => 0x5bf0000000000000, rule => qr"^$pred?BFI $r0, $r8, $ir20, $cr39;"o,                        } ],
     FLO       => [ { type => $s2rT,   code => 0x5c30000000000000, rule => qr"^$pred?FLO\.U32 $r0, $icr20;"o,                              } ],
     IADD      => [ { type => $x32T,   code => 0x5c10000000000000, rule => qr"^$pred?IADD$X $r0cc, $r8, $icr20;"o,                         } ],
@@ -435,7 +435,7 @@ SHF: type
 0x0000004000000000 U64
 0x0000006000000000 S64
 
-SHR, IMNMX, ISETP, ISET, ICMP
+SHR, IMNMX, ISETP, ISET, ICMP, BFE
 0x0001000000000000 U32
 
 SHFL

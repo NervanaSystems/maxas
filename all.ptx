@@ -653,6 +653,8 @@
 	vmad.u32.u32.u32.po.sat.shr7 vur32, vur32.b0, vur32.b0, vur32;
 	vmad.u32.u32.u32.sat.shr15 vur32, vur32.b0, vur32.b0, vur32;
 
+	mad24.lo.s32 var32, var32, var32, var32;
+
     st.global.s32 [out32+0], var32;
     st.global.u32 [out32+4], vur32;
     ret;
