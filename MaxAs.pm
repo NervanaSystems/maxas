@@ -697,8 +697,8 @@ sub Preprocess
 }
 
 # break the registers down into source and destination categories for the scheduler
-my %srcReg   = map { $_ => 1 } qw(r8 r20 r39 p12 p29 p39);
-my %destReg  = map { $_ => 1 } qw(r0 p0 p3 p45 p48);
+my %srcReg   = map { $_ => 1 } qw(r8 r20 r39 p12 p29 p39 X);
+my %destReg  = map { $_ => 1 } qw(r0 p0 p3 p45 p48 CC);
 my %regops   = (%srcReg, %destReg);
 my @itypes   = qw(class lat rlat tput dual);
 
@@ -783,7 +783,11 @@ sub Scheduler
                 if ($capData->{$operand} ne $badVal)
                 {
                     # add the value to list with the correct prefix
-                    push @$list, $operand eq 'r0' ? getVecRegisters($vectors, $capData) : $capData->{$operand};
+                    push @$list,
+                        $operand eq 'r0' ? getVecRegisters($vectors, $capData) :
+                        $operand eq 'CC' ? 'CC' :
+                        $operand eq 'X'  ? 'CC' :
+                        $capData->{$operand};
                 }
             }
 

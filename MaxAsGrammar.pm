@@ -269,7 +269,7 @@ our %grammar =
     FSWZADD  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?FSWZADD[^;]*;"o,                                    } ], #TODO
 
     #Integer Instructions
-    BFE       => [ { type => $shftT,  code => 0x5c01000000000000, rule => qr"^$pred?BFE$u32 $r0, $r8, $icr20;"o,                         } ],
+    BFE       => [ { type => $shftT,  code => 0x5c01000000000000, rule => qr"^$pred?BFE$u32 $r0, $r8, $icr20;"o,                          } ],
     BFI       => [ { type => $shftT,  code => 0x5bf0000000000000, rule => qr"^$pred?BFI $r0, $r8, $ir20, $cr39;"o,                        } ],
     FLO       => [ { type => $s2rT,   code => 0x5c30000000000000, rule => qr"^$pred?FLO\.U32 $r0, $icr20;"o,                              } ],
     IADD      => [ { type => $x32T,   code => 0x5c10000000000000, rule => qr"^$pred?IADD$X $r0cc, $r8, $icr20;"o,                         } ],
@@ -283,9 +283,9 @@ our %grammar =
     ISCADD32I => [ { type => $shftT,  code => 0x1400000000000000, rule => qr"^$pred?ISCADD32I $r0, $r8, $i20w32, $i53w5;"o,               } ],
     LEA       => [
                    { type => $cmpT,   code => 0x5bd0000000000000, rule => qr"^$pred?LEA $p48, $r0cc, $r8, $icr20;"o,                      },
-                   { type => $cmpT,   code => 0x5bd7000000000000, rule => qr"^$pred?LEA $r0cc, $r8, $icr20, $i39w8;"o,                    },
-                   { type => $cmpT,   code => 0x5bdf004000000000, rule => qr"^$pred?LEA\.HI\.X $r0cc, $r8, $r20, $r39, $i28w8;"o,         },
-                   { type => $cmpT,   code => 0x0a07000000000000, rule => qr"^$pred?LEA\.HI\.X $r0cc, $r8, $c20, $r39, $i51w5;"o,         },
+                   { type => $shftT,  code => 0x5bd7000000000000, rule => qr"^$pred?LEA $r0cc, $r8, $icr20, $i39w8;"o,                    },
+                   { type => $shftT,  code => 0x5bdf004000000000, rule => qr"^$pred?LEA\.HI$X $r0cc, $r8, $r20, $r39, $i28w8;"o,          },
+                   { type => $shftT,  code => 0x0a07000000000000, rule => qr"^$pred?LEA\.HI$X $r0cc, $r8, $c20, $r39, $i51w5;"o,          },
                  ],
     LOP       => [ { type => $x32T,   code => 0x5c40000000000000, rule => qr"^$pred?LOP$bool$lopz $r0, $r8, ~?$icr20;"o,                  } ],
     LOP32I    => [ { type => $x32T,   code => 0x0400000000000000, rule => qr"^$pred?LOP32I$bool $r0, $r8, $i20w32;"o,                     } ],
@@ -298,7 +298,7 @@ our %grammar =
                    { type => $shftT,  code => 0x5bf8000000000000, rule => qr"^$pred?SHF\.L$shf $r0, $r8, $ir20, $r39;"o,                  },
                    { type => $shftT,  code => 0x5cf8000000000000, rule => qr"^$pred?SHF\.R$shf $r0, $r8, $ir20, $r39;"o,                  },
                  ],
-    SHL       => [ { type => $shftT,  code => 0x5c48000000000000, rule => qr"^$pred?SHL $r0, $r8, $icr20;"o,                              } ],
+    SHL       => [ { type => $shftT,  code => 0x5c48000000000000, rule => qr"^$pred?SHL(?<W>\.W)? $r0, $r8, $icr20;"o,                    } ],
     SHR       => [ { type => $shftT,  code => 0x5c29000000000000, rule => qr"^$pred?SHR$u32 $r0, $r8, $icr20;"o,                          } ],
     # x32T is probably the main type for XMAD, but this needs thorough investigation..
     XMAD      => [
@@ -427,6 +427,9 @@ FMNMX, FSET, FSETP, DMNMX, DSET, DSETP, IMNMX, ISET, ISETP, SEL, PSET, PSETP, BA
 IADD, XMAD, LEA
 0x0000800000000000 CC
 
+LEA
+0x0000000000000000 X
+
 SHF
 0x0004000000000000 W
 0x0001000000000000 HI
@@ -437,6 +440,9 @@ SHF: type
 
 SHR, IMNMX, ISETP, ISET, ICMP, BFE
 0x0001000000000000 U32
+
+SHL
+0x0000008000000000 W
 
 SHFL
 0x0000000010000000 i20w8
