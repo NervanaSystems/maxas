@@ -890,7 +890,7 @@ sub Scheduler
 
             # if stall is greater than 4 then also yield
             $prev->{ctrl} &= $stall > 4 ? 0x1ffe0 : 0x1fff0;
-            $prev->{ctrl} |= $stall;
+            $prev->{ctrl} |= $stall > 11 ? 15 : $stall;
             $clock += $stall;
         }
         # For stalls bigger than 15 we assume the user is managing it with a barrier

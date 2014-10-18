@@ -272,7 +272,7 @@ our %grammar =
     BFE       => [ { type => $shftT,  code => 0x5c01000000000000, rule => qr"^$pred?BFE$u32 $r0, $r8, $icr20;"o,                          } ],
     BFI       => [ { type => $shftT,  code => 0x5bf0000000000000, rule => qr"^$pred?BFI $r0, $r8, $ir20, $cr39;"o,                        } ],
     FLO       => [ { type => $s2rT,   code => 0x5c30000000000000, rule => qr"^$pred?FLO\.U32 $r0, $icr20;"o,                              } ],
-    IADD      => [ { type => $x32T,   code => 0x5c10000000000000, rule => qr"^$pred?IADD$X $r0cc, $r8, $icr20;"o,                         } ],
+    IADD      => [ { type => $x32T,   code => 0x5c10000000000000, rule => qr"^$pred?IADD$sat$X $r0cc, $r8, $icr20;"o,                         } ],
     IADD32I   => [ { type => $x32T,   code => 0x1c00000000000000, rule => qr"^$pred?IADD32I $r0, $r8, $i20w32;"o,                         } ],
     IADD3     => [ { type => $x32T,   code => 0x5cc0000000000000, rule => qr"^$pred?IADD3$add3 $r0, $r8, $icr20, $r39;"o,                 } ],
     ICMP      => [ { type => $cmpT,   code => 0x5b41000000000000, rule => qr"^$pred?ICMP$icmp$u32 $r0, $r8, $icr20, $r39;"o,              } ],
@@ -585,6 +585,7 @@ IADD3
 
 IADD
 0x0000080000000000 X
+0x0004000000000000 SAT
 
 IADD, ISCADD
 0x0002000000000000 r8neg
