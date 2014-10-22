@@ -654,9 +654,20 @@ sub Extract
 }
 
 my $CommentRe  = qr'^[\t ]*<COMMENT>.*?^\s*</COMMENT>\n?'ms;
+my $IncludeRe  = qr'^[\t ]*<INCLUDE\s+file="([^"]+)"\s*/?>\n?'ms;
 my $CodeRe     = qr'^[\t ]*<CODE>(.*?)^\s*<\/CODE>\n?'ms;
 my $RegMapRe   = qr'^[\t ]*<REGISTER_MAPPING>(.*?)^\s*</REGISTER_MAPPING>\n?'ms;
 my $ScheduleRe = qr'^[\t ]*<SCHEDULE_BLOCK>(.*?)^\s*</SCHEDULE_BLOCK>\n?'ms;
+
+sub IncludeFile
+{
+    my $file = shift;
+    local $/;
+    open my $fh, $file or die "Could not open file for INCLUDE: $file ($!)\n";
+    my $content = <$fh>;
+    close $fh;
+    return $content;
+}
 
 sub Preprocess
 {
@@ -671,12 +682,14 @@ sub Preprocess
     # Strip out comments
     $file =~ s|$CommentRe||g;
 
+    $file =~ s|$IncludeRe| IncludeFile($1) |eg;
+
     # Execute the CODE sections
-    $file =~ s|$CodeRe| eval "package MaxAs::CODE; $1" or die "CODE:\n$1\n\nError: $@\n" |eg;
+    $file =~ s|$CodeRe| my $out = eval "package MaxAs::CODE; $1"; $@ ? die("CODE:\n$1\n\nError: $@\n") : $out |eg;
 
     # Pull in the reg map first as the Scheduler will need it to handle vector instructions
     # Remove the regmap if we're going on to assemble
-    $file =~ s/$RegMapRe/ setRegisterMap($regMap, $1); $removeRegMap ? '' : $& /ge;
+    $file =~ s/$RegMapRe/ setRegisterMap($regMap, $1); $removeRegMap ? '' : $& /eg;
 
     # Pick out the SCHEDULE_BLOCK sections
     my @schedBlocks = $file =~ /$ScheduleRe/g;
@@ -726,8 +739,9 @@ sub Scheduler
         {
             # if the first instruction in the block is waiting on a dep, it should go first.
             $inst->{first}   = !$first++ && ($inst->{ctrl} & 0x1f800) ? 0 : 1;
+
             # if the instruction has a stall of zero set, it's meant to be last (to mesh with next block)
-            $inst->{first}   = $inst->{ctrl} & 0x0000f ? 1 : 2;
+            #$inst->{first}   = $inst->{ctrl} & 0x0000f ? 1 : 2;
             $inst->{exeTime} = 0;
             $inst->{order}   = $ordered++ if $ordered;
             push @instructs, $inst;
