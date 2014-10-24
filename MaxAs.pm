@@ -679,10 +679,10 @@ sub Preprocess
     else
         { $regMap = {}; }
 
+    $file =~ s|$IncludeRe| IncludeFile($1) |eg;
+
     # Strip out comments
     $file =~ s|$CommentRe||g;
-
-    $file =~ s|$IncludeRe| IncludeFile($1) |eg;
 
     # Execute the CODE sections
     $file =~ s|$CodeRe| my $out = eval "package MaxAs::CODE; $1"; $@ ? die("CODE:\n$1\n\nError: $@\n") : $out |eg;
