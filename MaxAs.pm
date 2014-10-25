@@ -604,7 +604,55 @@ sub Test
 # Convert cuobjdump sass to the working format
 sub Extract
 {
-    my ($in, $out) = @_;
+    my ($in, $out, $params) = @_;
+
+    my %paramMap;
+    my %constants =
+    (
+        blockDimX => 'c[0x0][0x8]',
+        blockDimY => 'c[0x0][0xc]',
+        blockDimZ => 'c[0x0][0x10]',
+        gridDimX  => 'c[0x0][0x14]',
+        gridDimY  => 'c[0x0][0x18]',
+        gridDimZ  => 'c[0x0][0x1c]',
+    );
+    print $out "<CONSTANT_MAPPING>\n";
+
+    foreach my $const (sort keys %constants)
+    {
+        print $out "    $const : $constants{$const}\n";
+        $paramMap{$constants{$const}} = $const;
+    }
+    print $out "\n";
+
+    foreach my $p (@$params)
+    {
+        my ($ord,$offset,$size,$align) = split ':', $p;
+
+        if ($size > 4)
+        {
+            my $num = 0;
+            $offset = hex $offset;
+            while ($size > 0)
+            {
+                my $param = sprintf 'param_%d[%d]', $ord, $num;
+                my $const = sprintf 'c[0x0][0x%x]', $offset;
+                $paramMap{$const} = $param;
+                print $out "    $param : $const\n";
+                $size   -= 4;
+                $offset += 4;
+                $num    += 1;
+            }
+        }
+        else
+        {
+            my $param = sprintf 'param_%d', $ord;
+            my $const = sprintf 'c[0x0][%s]', $offset;
+            $paramMap{$const} = $param;
+            print $out "    $param : $const\n";
+        }
+    }
+    print $out "</CONSTANT_MAPPING>\n\n";
 
     my %labels;
     my $labelnum = 1;
@@ -640,6 +688,8 @@ sub Extract
                 # replace address with name
                 $inst->{ins} =~ s/(0x[0-9a-f]+)/$label/;
             }
+            $inst->{ins} =~ s/(c\[0x0\]\[0x[0-9a-f]+\])/ $paramMap{$1} || $1 /eg;
+
             $inst->{ctrl} = printCtrl($ctrl);
 
             push @data, $inst;
@@ -656,6 +706,7 @@ sub Extract
 my $CommentRe  = qr'^[\t ]*<COMMENT>.*?^\s*</COMMENT>\n?'ms;
 my $IncludeRe  = qr'^[\t ]*<INCLUDE\s+file="([^"]+)"\s*/?>\n?'ms;
 my $CodeRe     = qr'^[\t ]*<CODE>(.*?)^\s*<\/CODE>\n?'ms;
+my $ConstMapRe = qr'^[\t ]*<CONSTANT_MAPPING>(.*?)^\s*</CONSTANT_MAPPING>\n?'ms;
 my $RegMapRe   = qr'^[\t ]*<REGISTER_MAPPING>(.*?)^\s*</REGISTER_MAPPING>\n?'ms;
 my $ScheduleRe = qr'^[\t ]*<SCHEDULE_BLOCK>(.*?)^\s*</SCHEDULE_BLOCK>\n?'ms;
 
@@ -673,19 +724,36 @@ sub Preprocess
 {
     my ($file, $debug, $regMap) = @_;
 
+    my $constMap = {};
     my $removeRegMap;
     if ($regMap)
         { $removeRegMap = 1; }
     else
         { $regMap = {}; }
 
-    $file =~ s|$IncludeRe| IncludeFile($1) |eg;
+    # include nested files
+    1 while $file =~ s|$IncludeRe| IncludeFile($1) |eg;
 
     # Strip out comments
     $file =~ s|$CommentRe||g;
 
     # Execute the CODE sections
     $file =~ s|$CodeRe| my $out = eval "package MaxAs::CODE; $1"; $@ ? die("CODE:\n$1\n\nError: $@\n") : $out |eg;
+
+    #Pull in the constMap
+    $file =~ s/$ConstMapRe/ setConstMap($constMap, $1) /eg;
+
+    my @newFile;
+    foreach my $line (split "\n", $file)
+    {
+        # skip comments
+        if ($line !~ m'^\s*(?:#|//).*')
+        {
+            $line =~ s|(\w+(?:\[\d+\])?)| exists $constMap->{$1} ? $constMap->{$1} : $1 |eg;
+        }
+        push @newFile, $line;
+    }
+    $file = join "\n", @newFile;
 
     # Pull in the reg map first as the Scheduler will need it to handle vector instructions
     # Remove the regmap if we're going on to assemble
@@ -981,6 +1049,28 @@ sub Scheduler
     #$out .= "$_\n" foreach @comments;
     $out .= join('', printCtrl($_->{ctrl}), @{$_}{qw(space inst comment)}, "\n") foreach @schedule;
     return $out;
+}
+
+sub setConstMap
+{
+    my ($constMap, $constMapText) = @_;
+
+    foreach my $line (split "\n", $constMapText)
+    {
+        # strip leading space
+        $line =~ s|^\s+||;
+        # strip comments
+        $line =~ s{(?:#|//).*}{};
+        # strip trailing space
+        $line =~ s|\s+$||;
+        # skip blank lines
+        next unless $line =~ m'\S';
+
+        my ($name, $value) = split '\s*:\s*', $line;
+
+        $constMap->{$name} = $value;
+    }
+    return;
 }
 
 sub setRegisterMap

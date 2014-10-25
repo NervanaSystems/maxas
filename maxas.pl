@@ -44,8 +44,8 @@ elsif ($mode =~ /^\-?\-t/i)
     # cubin file
     else
     {
-		my $cubin = Cubin->new($file);
-		my $arch  = $cubin->arch;
+        my $cubin = Cubin->new($file);
+        my $arch  = $cubin->arch;
 
         open $fh, "cuobjdump.exe -arch sm_$arch -sass $file |" or die "cuobjdump.exe -arch sm_$arch -sass $file: $!";
         my $first = <$fh>;
@@ -104,7 +104,7 @@ elsif ($mode =~ /^\-?\-e/i)
 
     print $out "#\n# Instructions:\n\n";
 
-    MaxAs::Extract($in, $out);
+    MaxAs::Extract($in, $out, $kernel->{Params});
 
     close $out if $asmFile;
     close $in;
