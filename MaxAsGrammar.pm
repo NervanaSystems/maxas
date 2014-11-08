@@ -204,6 +204,7 @@ my $shf   = qr"(?<W>\.W)?(?:\.(?<type>U64|S64))?(?<HI>\.HI)?";
 my $xmad  = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<mode>MRG|PSL|CHI|CLO|CSFU))?(?<CBCC>\.CBCC)?";
 my $vmad8 = qr"\.(?<sign1>[SU])(?<size1>8|16)\.(?<sign2>[SU])(?<size2>8|16)(?<PO>\.PO)?(?<SHR_7>\.SHR_7)?(?<SHR_15>\.SHR_15)?(?<SAT>\.SAT)?";
 my $vmad16= qr"\.(?<sign1>[SU])(?<size1>16)\.(?<sign2>[SU])(?<size2>16)";
+my $vadd  = qr"(?:\.(?<mode>MRG_16H|ACC|MIN|MAX))?";
 my $x2x   = qr"\.(?<destSign>F|U|S)(?<destWidth>8|16|32|64)\.(?<srcSign>F|U|S)(?<srcWidth>8|16|32|64)";
 my $prmt  = qr"(?:\.(?<mode>F4E|B4E|RC8|ECL|ECR|RC16))?";
 my $shfl  = qr"\.(?<mode>IDX|UP|DOWN|BFLY)";
@@ -276,8 +277,8 @@ our %grammar =
     IADD32I   => [ { type => $x32T,   code => 0x1c00000000000000, rule => qr"^$pred?IADD32I $r0, $r8, $i20w32;"o,                         } ],
     IADD3     => [ { type => $x32T,   code => 0x5cc0000000000000, rule => qr"^$pred?IADD3$add3 $r0, $r8, $icr20, $r39;"o,                 } ],
     ICMP      => [ { type => $cmpT,   code => 0x5b41000000000000, rule => qr"^$pred?ICMP$icmp$u32 $r0, $r8, $icr20, $r39;"o,              } ],
-    IMNMX     => [ { type => $cmpT,   code => 0x5c21000000000000, rule => qr"^$pred?IMNMX$u32 $r0, $r8, $icr20, $p39;"o,                  } ],
-    ISET      => [ { type => $cmpT,   code => 0x5b51000000000000, rule => qr"^$pred?ISET$icmp$u32$X$bool $r0, $r8, $icr20, $p39;"o,       } ],
+    IMNMX     => [ { type => $shftT,  code => 0x5c21000000000000, rule => qr"^$pred?IMNMX$u32 $r0, $r8, $icr20, $p39;"o,                  } ],
+    ISET      => [ { type => $shftT,  code => 0x5b51000000000000, rule => qr"^$pred?ISET$icmp$u32$X$bool $r0, $r8, $icr20, $p39;"o,       } ],
     ISETP     => [ { type => $cmpT,   code => 0x5b61000000000000, rule => qr"^$pred?ISETP$icmp$u32$X$bool $p3, $p0, $r8, $icr20, $p39;"o, } ],
     ISCADD    => [ { type => $shftT,  code => 0x5c18000000000000, rule => qr"^$pred?ISCADD $r0, $r8, $icr20, $i39w8;"o,                   } ],
     ISCADD32I => [ { type => $shftT,  code => 0x1400000000000000, rule => qr"^$pred?ISCADD32I $r0, $r8, $i20w32, $i53w5;"o,               } ],
@@ -400,13 +401,12 @@ our %grammar =
 
     #Video Instructions... TODO
     # Quick and dirty VADD for now.  Just added to get 100% cublas_device.lib coverage.
-    VADD   => [ { type => $x32T, code => 0x2044004040000000, rule => qr"^$pred?VADD\.U16\.U16\.MRG_16H $r0, $r8, $r20, $r39;"o, } ], #Partial
+    VADD   => [ { type => $x32T, code => 0x2044000000000000, rule => qr"^$pred?VADD$vmad16$vadd $r0, $r8, $r20, $r39;"o, } ], #Partial
     VMAD   => [
                 { type => $x32T,  code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad16 $r0, $r8, $r20, $r39;"o, },
                 { type => $shftT, code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad8 $r0, $r8, $r20, $r39;"o, },
               ],
 );
-
 
 # Create map of capture groups to op code flags that need to be added (or removed)
 my @flags = grep /\S/, split "\n", q{;
@@ -528,13 +528,13 @@ XMAD: r20part
 XMAD: r39part
 0x0010000000000000 H1
 
-VMAD: r8part
+VMAD, VADD: r8part
 0x0000001000000000 B1
 0x0000002000000000 B2
 0x0000003000000000 B3
 0x0000001000000000 H1
 
-VMAD: r20part
+VMAD, VADD: r20part
 0x0000000010000000 B1
 0x0000000020000000 B2
 0x0000000030000000 B3
@@ -548,19 +548,25 @@ VMAD
 0x0060000000000000 PO
 0x0080000000000000 SAT
 
-VMAD: sign1
+VADD: mode
+0x0000000000000000 MRG_16H
+0x0020000000000000 ACC
+0x0028000000000000 MIN
+0x0030000000000000 MAX
+
+VMAD, VADD: sign1
 0x0000000000000000 U
 0x0001000000000000 S
 
-VMAD: sign2
+VMAD, VADD: sign2
 0x0000000000000000 U
 0x0002000000000000 S
 
-VMAD: size1
+VMAD, VADD: size1
 0x0000000000000000 8
 0x0000004000000000 16
 
-VMAD: size2
+VMAD, VADD: size2
 0x0000000000000000 8
 0x0000000040000000 16
 
@@ -869,7 +875,7 @@ ATOM: type
 0x000a000000000000 .S64
 0x0002000000000000 .64
 
-ATOM
+ATOM, RED
 0x0001000000000000 E
 
 ATOM: mode
