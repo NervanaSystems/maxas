@@ -47,7 +47,7 @@ elsif ($mode =~ /^\-?\-t/i)
         my $cubin = Cubin->new($file);
         my $arch  = $cubin->arch;
 
-        open $fh, "cuobjdump.exe -arch sm_$arch -sass $file |" or die "cuobjdump.exe -arch sm_$arch -sass $file: $!";
+        open $fh, "cuobjdump -arch sm_$arch -sass $file |" or die "cuobjdump -arch sm_$arch -sass $file: $!";
         my $first = <$fh>;
         if ($first =~ /cuobjdump fatal/)
         {
@@ -77,7 +77,7 @@ elsif ($mode =~ /^\-?\-e/i)
 
     my $kernel = $kernels->{$kernelName} or die "bad kernel: $kernelName";
 
-    open my $in, "cuobjdump.exe -arch sm_$arch -sass -fun $kernelName $cubinFile |" or die "cuobjdump.exe -arch sm_50 -sass -fun $kernelName $cubinFile: $!";
+    open my $in, "cuobjdump -arch sm_$arch -sass -fun $kernelName $cubinFile |" or die "cuobjdump -arch sm_50 -sass -fun $kernelName $cubinFile: $!";
     my $first = <$in>;
     if ($first =~ /cuobjdump fatal/)
     {

@@ -422,10 +422,16 @@ sub Assemble
                 # get numeric portion of regname
                 my $val = substr $capData->{$r}, 1;
 
-                # smart enough to count vector registers for memory instructions.
-                my $regInc = $r eq 'r0' ? scalar(getVecRegisters($vectors, $capData)) : 1;
+                my @r0 = getVecRegisters($vectors, $capData);
 
-                $regCnt = $val + $regInc if $val + $regInc > $regCnt;
+                # smart enough to count vector registers for memory instructions.
+                my $regInc = $r eq 'r0' ? scalar(@r0) || 1 : 1;
+
+                if ($val + $regInc > $regCnt)
+                {
+                    $regCnt = $val + $regInc;
+                    #print "$val $regCnt $regInc\n";
+                }
             }
             # update the barrier resource count
             if ($op eq 'BAR')
@@ -884,6 +890,7 @@ sub Scheduler
                 {
                     # add this instruction as a child of the parent
                     # set the edge to the total latency of reg source availability
+                    #print "R $parent->{inst} \t\t\t $instruct->{inst}\n";
                     push @{$parent->{children}}, [$instruct, $parent->{lat} - $regLatency];
                     $instruct->{parents}++;
 
@@ -899,6 +906,7 @@ sub Scheduler
                 foreach my $reader (@{$reads{$dest}})
                 {
                     # no need to stall for these types of dependencies
+                    #print "W $reader->{inst} \t\t\t $instruct->{inst}\n";
                     push @{$reader->{children}}, [$instruct, 0];
                     $instruct->{parents}++;
                 }
@@ -942,6 +950,7 @@ sub Scheduler
     {
         # update dependent counts for sorting hueristic
         my $readyParent = { children => [ map { [ $_, 1 ] } @ready ] };
+
         countUniqueDescendants($readyParent);
         updateDepCounts($readyParent);
 
@@ -1215,6 +1224,7 @@ sub countUniqueDescendants
 sub updateDepCounts
 {
     my $node = shift;
+
     if (my $children = $node->{children})
     {
         updateDepCounts($_->[0]) foreach @$children;
