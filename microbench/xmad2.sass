@@ -1,0 +1,144 @@
+# Kernel: microbench
+# InsCnt: 18
+# RegCnt: 5
+# SharedSize: 4096
+# BarCnt: 1
+# Params(3):
+#	ord:addr:size:align
+#	0:0x140:8:0
+#	1:0x148:8:0
+#	2:0x150:8:0
+#
+# Instructions:
+
+<CONSTANT_MAPPING>
+    blockDimX : c[0x0][0x8]
+    blockDimY : c[0x0][0xc]
+    blockDimZ : c[0x0][0x10]
+    gridDimX : c[0x0][0x14]
+    gridDimY : c[0x0][0x18]
+    gridDimZ : c[0x0][0x1c]
+
+    param_out[0] : c[0x0][0x140]
+    param_out[1] : c[0x0][0x144]
+    param_clocks[0] : c[0x0][0x148]
+    param_clocks[1] : c[0x0][0x14c]
+    param_in[0] : c[0x0][0x150]
+    param_in[1] : c[0x0][0x154]
+</CONSTANT_MAPPING>
+
+<REGISTER_MAPPING>
+
+	0-1 : out<0-1>
+	2-3 : clocks<0-1>
+    4-15  : result, result2, tid, bid, blockDim, clock1, clock2, scale, s
+    16-24 : a, b, c, x
+
+</REGISTER_MAPPING>
+
+// Load in our params
+--:-:-:-:1      MOV out0,      param_out[0];
+--:-:-:-:1      MOV out1,      param_out[1];
+--:-:-:-:1      MOV clocks0,   param_clocks[0];
+--:-:-:-:1      MOV clocks1,   param_clocks[1];
+//--:-:-:-:1      MOV in,       c[0x0][0x148];
+--:-:-:-:1      MOV blockDim, blockDimX;
+
+--:-:-:-:1      PSETP.AND.AND P0, PT, !PT, PT, PT;
+
+--:-:-:-:6      MOV32I result,  0xffffffff;
+--:-:-:-:6      MOV32I result2, 0x0;
+--:-:-:-:1      MOV32I a, 1;
+--:-:-:-:1      MOV32I b, 1;
+--:-:-:-:6      MOV32I c, 0x0;
+
+// (127 - scale) << 23
+//--:-:-:-:6      MOV32I scale, 28;
+//--:-:-:-:6      IADD scale, -scale, 127;
+//--:-:-:-:6      SHL  scale, scale, 23;
+
+
+//--:-:-:-:6      MOV32I c, 0x4f765432;
+
+//--:-:1:-:2      LDG.CI.128 a, [in];
+
+//01:-:-:-:6      VMAD.S16.S16 result, a, b, c;
+
+//--:-:-:-:6      MOV result, a;
+
+// a >> 16 | (b & 0xffff0000)
+
+//--:-:-:-:6      SHR.U32 result, a, 16;
+//--:-:-:-:6      LOP3.LUT result, result, b, c, 0xf8;
+
+//--:-:-:-:6      I2I.S32.S16 result, a.H1;
+
+//--:-:-:Y:d      IADD result.CC, a, -c;
+//--:-:-:Y:2      IADD.X result2, b, -RZ;
+
+//--:-:-:-:6      SHR result, a, 1;
+
+//--:-:-:-:6      BFI result, b, 0x1010, a;
+
+--:-:-:-:1      CS2R clock1, SR_CLOCKLO;
+
+//--:-:-:-:6      XMAD.S16.S16 c, a, b, RZ;
+//--:-:-:-:6      ISET.LT.AND s, c, RZ, PT;
+//--:-:-:-:6      IADD result.CC, c, result;
+//--:-:-:-:6      IADD.X result2, s, result2;
+
+//--:-:-:-:6      XMAD.S16.S16 result.CC, a, b, result;
+//--:-:-:-:6      IADD.X result2, result2, RZ;
+
+//--:-:-:-:6      SHF.R.S64 result, result, 1, result2;
+//--:-:-:-:6      MOV32I result2, 0;
+
+--:-:-:-:f      LOP.AND.NZ P0, RZ, result, 1;
+
+--:-:-:-:6  @P0 VADD.S16.S16.SAT.MRG_16H result, a, b, result;
+
+//--:-:1:-:d      I2F.F32.S32 result2, a;
+//01:-:-:-:6      FMUL result2, result2, scale;
+//01:-:2:-:d      F2I.S32.F32 result, result2;
+
+02:-:-:-:6      CS2R clock2, SR_CLOCKLO;
+
+//F2I   = "^$pred?F2I$ftz$x2x$round $r0, $cr20;"
+//I2F   = "^$pred?I2F$x2x$rnd $r0, $cr20;"
+//x2x   = "\.(?<destSign>F|U|S)(?<destWidth>8|16|32|64)\.(?<srcSign>F|U|S)(?<srcWidth>8|16|32|64)"
+//rnd   = "(?:\.(?<rnd>RN|RM|RP|RZ))?"
+//round = "(?:\.(?<round>ROUND|FLOOR|CEIL|TRUNC))?"
+//r8    = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1|B1|B2|B3))?(?<reuse1>\.reuse)?"
+//r20   = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r20>$reg)\|?(?:\.(?<r20part>H0|H1|B1|B2|B3))?(?<reuse2>\.reuse)?"
+
+
+//--:-:-:-:1      XMAD.MRG x, a, b.H1, RZ;
+//--:-:-:-:6      XMAD result, a.H1, b.H1, c;
+//--:-:-:-:1      XMAD.PSL.CBCC result, a.H1, x.H1, result;
+
+// Get the first clock value
+
+--:-:1:-:1      S2R tid, SR_TID.X;
+--:-:2:-:2      S2R bid, SR_CTAID.X;
+
+
+
+// Take the difference of clocks
+--:-:-:-:1      IADD clock1, clock2, -clock1;
+
+// Setup our output addresses
+// Stall your pipeline dependencies properly
+03:-:-:-:1      XMAD tid, blockDim, bid, tid;
+--:-:-:Y:6      XMAD.MRG x, blockDim, bid.H1, RZ;
+--:-:-:Y:6      XMAD.PSL.CBCC tid, blockDim.H1, x.H1, tid;
+--:-:-:Y:6      SHL  tid, tid, 0x2;
+
+--:-:-:-:1      IADD clocks, clocks, tid;
+--:-:-:-:1      IADD out,  out,  tid;
+
+// Output the results.
+// No stall needed on prior instruction as memory store instructions have a 5 clock delay in picking up register values
+--:-:-:-:1      STG.E [clocks], result2;
+--:-:-:-:1      STG.E [out],    result;
+--:-:-:-:5      EXIT;
+

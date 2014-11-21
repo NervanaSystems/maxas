@@ -1,0 +1,116 @@
+# Kernel: microbench
+# InsCnt: 18
+# RegCnt: 5
+# SharedSize: 4096
+# BarCnt: 1
+# Params(3):
+#   ord:addr:size:align
+#   0:0x140:4:0
+#   1:0x144:4:0
+#   2:0x148:4:0
+
+// This is a simple micro bench to demonstrate the latency in loading SR_TID.X
+
+<REGISTER_MAPPING>
+
+    0-3 : result, a, b, c
+
+    4-40 : out, clocks, in, tid, bid, blockDim, clock1, clock2, x, tid1, tid31, tid32, readAs, readBs, val<0-20>
+
+</REGISTER_MAPPING>
+
+// Load in our params
+--:-:1:-:1      S2R tid,      SR_TID.X;
+--:-:2:-:1      S2R bid,      SR_CTAID.X;
+
+//--:-:-:-:1      MOV result,  c[0x0][0x0];
+//--:-:-:-:1      MOV in,      c[0x0][0x100];
+--:-:-:-:1      MOV result, 1;
+
+--:-:-:-:1      MOV blockDim, c[0x0][0x8];
+--:-:-:-:1      MOV out,      c[0x0][0x140];
+--:-:-:-:1      MOV clocks,   c[0x0][0x144];
+
+
+// readAs = ((tid >> 1) & 7) << 4;
+03:-:-:-:6      BFE.U32 readAs, tid,    0x301; // 3 bits at position 1
+--:-:-:-:6      SHL     readAs, readAs, 3;
+
+// readBs  = (((tid & 0x30) >> 3) | (tid & 1)) << 4 + 1024;
+--:-:-:-:6      LOP.AND tid1,   tid,    1;
+--:-:-:-:6      LOP.AND readBs, tid,    0x30;
+--:-:-:-:6      SHR.U32 readBs, readBs, 3;
+--:-:-:-:6      LOP.OR  readBs, readBs, tid1;
+--:-:-:-:6      ISCADD  readBs, readBs, 0, 3;
+
+
+
+///--:-:-:-:1      STS [tid32], result;
+//--:-:-:-:1      STS.S16 [tid32 + 2x<32>], result;
+//--:-:1:-:2      LDS.U.64 result, [readBs];
+
+--:-:-:-:0      CS2R clock1, SR_CLOCKLO;
+--:-:1:-:6      LDS.U.64 result, [readAs];
+--:-:-:-:6      CS2R clock2, SR_CLOCKLO;
+
+
+01:-:-:-:1      IADD clock1, clock2, -clock1;
+
+
+--:-:-:-:1      XMAD tid, blockDim, bid, tid;
+--:-:-:Y:6      XMAD.MRG x, blockDim, bid.H1, RZ;
+--:-:-:Y:6      XMAD.PSL.CBCC tid, blockDim.H1, x.H1, tid;
+--:-:-:Y:6      SHL  tid, tid, 0x2;
+
+--:-:-:-:1      IADD clocks, clocks, tid;
+--:-:-:-:2      IADD out,  out,  tid;
+
+--:-:-:-:1      STG [clocks], clock1;
+--:-:-:-:1      STG [out],    result;
+--:-:-:-:5      EXIT;
+
+<COMMENT>
+
+--:-:-:-:4      LOP.AND tid32, tid, -32;
+
+--:-:-:-:1      STS.128 [tid32 + 4x<2048>], RZ;
+
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:-:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+--:-:1:-:1      LDS.U.128 result, [tid32 + 4x<2048>];
+
+03:-:-:-:6      LOP.AND  tid31, tid, 31;
+--:-:-:-:6      LOP.AND  tid32, tid, 32;
+--:-:-:-:6      SHL  tid32, tid32, 0x2;
+--:-:-:-:6      LOP.OR  tid32, tid32, tid31;
+--:-:-:-:6      SHL  tid32, tid32, 0x2;
+
+// readAs = (((tid & 0x80) >> 4) | ((tid >> 1) & 7)) << 4;
+--:-:-:-:1      BFE.U32 tid7,   tid,    0x301;
+--:-:-:-:1      LOP.AND readAs, tid,    0x80;
+--:-:-:-:1      SHR.U32 readAs, readAs, 4;
+--:-:-:-:1      LOP.OR  readAs, readAs, tid7;
+--:-:-:-:1      SHL     readAs, readAs, 4;
+
+// readBs  = ((($tid & 0x70) >> 3) | ($tid & 1)) << 4 + 4096;
+--:-:-:-:1      LOP.AND tid1,   tid,    0x1;
+--:-:-:-:1      LOP.AND readBs, tid,    0x70;
+--:-:-:-:1      SHR.U32 readBs, readBs, 3;
+--:-:-:-:1      LOP.OR  readBs, readBs, tid1;
+--:-:-:-:1      ISCADD  readBs, readBs, 4x<1024>, 4;
+
+
+</COMMENT>

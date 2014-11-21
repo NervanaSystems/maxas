@@ -1,0 +1,95 @@
+# Kernel: microbench
+# InsCnt: 18
+# RegCnt: 5
+# SharedSize: 4096
+# BarCnt: 1
+# Params(3):
+#   ord:addr:size:align
+#   0:0x140:4:0
+#   1:0x144:4:0
+#   2:0x148:4:0
+
+<REGISTER_MAPPING>
+
+    8-20 : count
+
+</REGISTER_MAPPING>
+
+--:-:-:-:1      MOV R0, RZ;
+--:-:-:-:1      MOV R1, RZ;
+--:-:-:-:1      MOV R2, RZ;
+--:-:-:-:1      MOV R3, RZ;
+--:-:-:-:1      MOV R4, RZ;
+--:-:-:-:1      MOV R5, RZ;
+--:-:-:-:1      MOV R6, RZ;
+--:-:-:-:1      MOV R7, RZ;
+--:-:-:-:1      MOV R8, RZ;
+--:-:-:Y:6      MOV count, RZ;
+
+// This loop is capable of running at 1700 GFlops on GM107.
+// You can tweak it to see how register bank conflicts or different control codes
+// effect performance.
+// With thoughput.pl you can pass params to this code and do some autotuning.
+LOOP:
+
+--:-:-:-:1      ISETP.LE.AND P0, PT, count, 0x19000, PT;
+--:-:-:-:1      IADD count, count, 0x1;
+
+<CODE>
+    my $out;
+
+    foreach my $i (0..511) #511
+    {
+        my $y = ($i + 32) & 63 ? '-' : 'Y';
+
+        $out .= qq|
+--:-:-:$y:1      FFMA R0, R1, R2, R3;|; #c[0x0][$c]
+    }
+    return $out;
+</CODE>
+
+--:-:-:Y:5  @P0 BRA LOOP;
+
+--:-:-:-:5      EXIT;
+
+<COMMENT>
+
+
+    open my $fh, 'params.txt';
+    my $line = <$fh>;
+    close $fh;
+    my ($r1, $r2, $r3) = split "\t", $line;
+
+    80-95 : out, clocks, in, tid, clock1, clock2, result
+
+
+--:-:1:-:1      S2R tid,   SR_TID.X;
+--:-:-:-:1      MOV out,    c[0x0][0x140];
+--:-:-:-:1      MOV clocks, c[0x0][0x144];
+01:-:-:-:1      MOV in,     c[0x0][0x148];
+
+
+
+--:-:-:-:1      MOV32I f0, 0x3f800000;
+--:-:-:-:1      MOV32I f1, 0x3f800000;
+--:-:-:-:1      MOV32I f2, 0x3f800000;
+--:-:-:-:5      MOV32I f3, 0x3f800000;
+
+--:-:-:-:1      CS2R clock1, SR_CLOCKLO;
+
+
+--:-:-:-:1      CS2R clock2, SR_CLOCKLO;
+
+--:-:-:-:6      MOV32I result, 0x457;
+--:-:-:-:1      IADD clock1, clock2, -clock1;
+
+
+--:-:-:-:6      SHL  tid, tid, 0x2;
+--:-:-:-:1      IADD clocks, clocks, tid;
+--:-:-:-:1      IADD out,  out,  tid;
+
+--:-:-:-:1      STG [clocks], clock1;
+--:-:-:-:1      STG [out],    R24;
+
+
+</COMMENT>

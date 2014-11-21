@@ -1,0 +1,47 @@
+# Kernel: microbench
+
+<REGISTER_MAPPING>
+
+    0-10 : result, r1, r2, r3
+    20-27 ~ count, stop
+
+</REGISTER_MAPPING>
+
+--:-:-:-:1      MOV count, RZ;
+--:-:-:-:1      MOV32I stop, 102400;
+--:-:-:-:1      MOV32I r1, 1.0;
+--:-:-:-:1      MOV32I r2, 1.0;
+--:-:-:-:4      MOV32I r3, 1.0;
+
+LOOP:
+
+--:-:-:-:1      ISETP.LE.AND P0, PT, count, stop, PT;
+--:-:-:-:1      IADD count, count, 1;
+
+<CODE>
+    my $out;
+
+    foreach my $i (0 .. 511)
+    {
+        my $yield = ($i + 32) & 63 ? '-' : 'Y';
+
+        my $stall = $i == 511 ? 0 : 1;
+
+        #$out .= "--:-:-:$yield:1      FFMA r3, r1, r2, r3;\n";
+        #$out .= "--:-:-:-:1      FFMA r3, r1, r2, r3;\n";
+        #$out .= "--:-:-:-:1      FFMA r3, r1, r2, r3;\n";
+        #$out .= "--:-:-:-:0      FFMA r3, r1, r2, r3;\n";
+        #$out .= "--:-:-:-:1      I2F.F32.S16 result, r1;\n";
+
+        #$out .= "--:-:-:$yield:$stall      VADD.S16.S16.SAT.MRG_16L result, r1, r2, RZ;\n";
+        #$out .= "--:-:-:-:1      MOV result, RZ;\n";
+
+        $out .= "--:-:-:$yield:$stall      IADD.SAT result, r1, r2;\n";
+        #$out .= "--:-:-:$yield:$stall      VMAD.S8.S8.SAT result, r1, r2, r3;\n";
+        #$out .= "--:-:-:$yield:$stall      XMAD result, r1, r2, r3;\n";
+    }
+    return $out;
+</CODE>
+
+--:-:-:Y:5  @P0 BRA LOOP;
+--:-:-:-:5      EXIT;
