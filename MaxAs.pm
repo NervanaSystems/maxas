@@ -891,7 +891,8 @@ sub Scheduler
                     # add this instruction as a child of the parent
                     # set the edge to the total latency of reg source availability
                     #print "R $parent->{inst} \t\t\t $instruct->{inst}\n";
-                    push @{$parent->{children}}, [$instruct, $parent->{lat} - $regLatency];
+                    my $latency = $src =~ m'^P\d' ? 13 : $parent->{lat};
+                    push @{$parent->{children}}, [$instruct, $latency - $regLatency];
                     $instruct->{parents}++;
 
                     # if the destination was conditionally executed, we also need to keep going back till it wasn't
