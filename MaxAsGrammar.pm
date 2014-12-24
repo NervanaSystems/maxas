@@ -278,8 +278,8 @@ our %grammar =
     BFI       => [ { type => $shftT,  code => 0x5bf0000000000000, rule => qr"^$pred?BFI $r0, $r8, $ir20, $cr39;"o,                        } ],
     FLO       => [ { type => $s2rT,   code => 0x5c30000000000000, rule => qr"^$pred?FLO\.U32 $r0, $icr20;"o,                              } ],
     IADD      => [ { type => $x32T,   code => 0x5c10000000000000, rule => qr"^$pred?IADD$sat$X $r0cc, $r8, $icr20;"o,                         } ],
-    IADD32I   => [ { type => $x32T,   code => 0x1c00000000000000, rule => qr"^$pred?IADD32I $r0, $r8, $i20w32;"o,                         } ],
-    IADD3     => [ { type => $x32T,   code => 0x5cc0000000000000, rule => qr"^$pred?IADD3$add3 $r0, $r8, $icr20, $r39;"o,                 } ],
+    IADD32I   => [ { type => $x32T,   code => 0x1c00000000000000, rule => qr"^$pred?IADD32I $r0cc, $r8, $i20w32;"o,                         } ],
+    IADD3     => [ { type => $x32T,   code => 0x5cc0000000000000, rule => qr"^$pred?IADD3$add3 $r0cc, $r8, $icr20, $r39;"o,                 } ],
     ICMP      => [ { type => $cmpT,   code => 0x5b41000000000000, rule => qr"^$pred?ICMP$icmp$u32 $r0, $r8, $icr20, $r39;"o,              } ],
     IMNMX     => [ { type => $shftT,  code => 0x5c21000000000000, rule => qr"^$pred?IMNMX$u32$hilo $r0cc, $r8, $icr20, $p39;"o,                  } ],
     ISET      => [ { type => $shftT,  code => 0x5b51000000000000, rule => qr"^$pred?ISET$icmp$u32$X$bool $r0, $r8, $icr20, $p39;"o,       } ],
@@ -428,8 +428,11 @@ PSET, PSETP
 FMNMX, FSET, FSETP, DMNMX, DSET, DSETP, IMNMX, ISET, ISETP, SEL, PSET, PSETP, BAR, VOTE
 0x0000040000000000 p39not
 
-IADD, XMAD, LEA, IMNMX
+IADD, IADD3, XMAD, LEA, IMNMX
 0x0000800000000000 CC
+
+IADD32I
+0x0010000000000000 CC
 
 LEA
 0x0000000000000000 X
