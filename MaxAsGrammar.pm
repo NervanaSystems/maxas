@@ -1161,6 +1161,7 @@ sub replaceXMADs
         my $replace;
         if (exists $+{br})
         {
+            die "XMAD.LO: Destination and first operand cannot be the same register ($+{d})." if $+{d} eq $+{a};
             $replace = sprintf '
 %1$s%2$s%3$sXMAD.MRG %8$s, %5$s, %6$s.H1, RZ;%9$s
 %1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;

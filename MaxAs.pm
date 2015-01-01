@@ -404,7 +404,7 @@ sub Assemble
 
         # save the original and replace the register names with numbers
         $instructs[$i]{orig} = $instructs[$i]{inst};
-        $instructs[$i]{inst} =~ s/(\w+)(?!\[)/ exists($regMap->{$1}) ? $regMap->{$1} : $1 /ge;
+        $instructs[$i]{inst} =~ s/(?<!\.)\b(\w+)\b(?!\[)/ exists($regMap->{$1}) ? $regMap->{$1} : $1 /ge;
 
         my ($op, $inst, $ctrl) = @{$instructs[$i]}{qw(op inst ctrl)};
 
