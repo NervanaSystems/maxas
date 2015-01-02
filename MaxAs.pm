@@ -890,7 +890,7 @@ sub Scheduler
                 {
                     # add this instruction as a child of the parent
                     # set the edge to the total latency of reg source availability
-                    #print "R $parent->{inst} \t\t\t $instruct->{inst}\n";
+                    #print "R $parent->{inst}\n\t\t$instruct->{inst}\n";
                     my $latency = $src =~ m'^P\d' ? 13 : $parent->{lat};
                     push @{$parent->{children}}, [$instruct, $latency - $regLatency];
                     $instruct->{parents}++;
@@ -950,10 +950,10 @@ sub Scheduler
     if (@ready)
     {
         # update dependent counts for sorting hueristic
-        my $readyParent = { children => [ map { [ $_, 1 ] } @ready ] };
+        my $readyParent = { children => [ map { [ $_, 1 ] } @ready ], inst => "root" };
 
-        countUniqueDescendants($readyParent);
-        updateDepCounts($readyParent);
+        countUniqueDescendants($readyParent, {});
+        updateDepCounts($readyParent, {});
 
         # sort the initial ready list
         @ready = sort {
@@ -1207,12 +1207,17 @@ sub preProcessLine
 # only count unique nodes (by lineNum)
 sub countUniqueDescendants
 {
-    my $node = shift;
+    my ($node, $edges) = @_;
+
+    #warn "$node->{inst}\n";
+
     if (my $children = $node->{children})
     {
-        foreach my $child (grep $_->[1], @$children) # skip WaR deps
+        foreach my $child (grep $_->[1], @$children) # skip WaR deps and traversed edges
         {
-            $node->{deps}{$_}++ foreach countUniqueDescendants($child->[0]);
+            next if $edges->{"$node->{lineNum}^$child->[0]{lineNum}"}++;
+
+            $node->{deps}{$_}++ foreach countUniqueDescendants($child->[0], $edges);
         }
     }
     else
@@ -1224,11 +1229,17 @@ sub countUniqueDescendants
 # convert hash to count for easier sorting.
 sub updateDepCounts
 {
-    my $node = shift;
+    my ($node, $edges) = @_;
+
+    #warn "$node->{inst}\n";
 
     if (my $children = $node->{children})
     {
-        updateDepCounts($_->[0]) foreach @$children;
+        foreach my $child (@$children)
+        {
+            next if $edges->{"$node->{lineNum}^$child->[0]{lineNum}"}++; 
+            updateDepCounts($child->[0], $edges);
+        }
     }
     $node->{deps} = ref $node->{deps} ? keys %{$node->{deps}} : $node->{deps}+0;
 }
@@ -1282,6 +1293,8 @@ sub registerHealth
     }
     return scalar @conflicts;
 }
+
+1;
 
 __END__
 
