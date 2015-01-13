@@ -243,7 +243,7 @@ my $x32T  = {class => 'x32',   lat => 6,   blat => 0,   rlat => 0, rhold => 0,  
 my $x64T  = {class => 'x64',   lat => 2,   blat => 128, rlat => 0, rhold => 0,  tput => 128, dual => 0, reuse => 1};
 my $shftT = {class => 'shift', lat => 6,   blat => 0,   rlat => 0, rhold => 0,  tput => 2,   dual => 0, reuse => 1};
 my $cmpT  = {class => 'cmp',   lat => 13,  blat => 0,   rlat => 0, rhold => 0,  tput => 2,   dual => 0, reuse => 1};
-my $qtrT  = {class => 'qtr',   lat => 13,  blat => 0,   rlat => 0, rhold => 0,  tput => 4,   dual => 0, reuse => 0};
+my $qtrT  = {class => 'qtr',   lat => 8,   blat => 0,   rlat => 0, rhold => 0,  tput => 4,   dual => 1, reuse => 0};
 my $rroT  = {class => 'rro',   lat => 2,   blat => 0,   rlat => 0, rhold => 0,  tput => 1,   dual => 0, reuse => 0};
 
 # Create map of op names to rules

@@ -1028,8 +1028,8 @@ sub Scheduler
             {
                 $stall = $ready->{tput} if $stall < $ready->{tput};
             }
-            # dual issue with a simple instruction (tput == 1)
-            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} == 1 && $stall == 1 && $ready->{exeTime} <= $clock)
+            # dual issue with a simple instruction (tput <= 2)
+            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} <= 2 && $stall == 1 && $ready->{exeTime} <= $clock)
             {
                 $stall = 0;
             }
