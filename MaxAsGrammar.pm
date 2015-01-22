@@ -205,8 +205,9 @@ my $xmad  = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<mode>MRG|
 my $vmad8 = qr"\.(?<sign1>[SU])(?<size1>8|16)\.(?<sign2>[SU])(?<size2>8|16)(?<PO>\.PO)?(?<SHR_7>\.SHR_7)?(?<SHR_15>\.SHR_15)?(?<SAT>\.SAT)?";
 my $vmad16= qr"\.(?<sign1>[SU])(?<size1>16)\.(?<sign2>[SU])(?<size2>16)";
 my $hilo  = qr"(?:\.(?<mode>XHI|XLO))?";
-my $vaddType = qr"(?:\.(?<UD>UD))?(?:\.(?<sign1>[SU])(?<size1>8|16|32))?(?:\.(?<sign2>[SU])(?<size2>8|16|32))?";
+my $vaddType = qr"(?:\.(?<UD>UD))?(?:\.(?<SD>SD))?(?:\.(?<sign1>[SU])(?<size1>8|16|32))?(?:\.(?<sign2>[SU])(?<size2>8|16|32))?";
 my $vaddMode = qr"(?:\.(?<mode>MRG_16[HL]|MRG_8B[0-3]|ACC|MIN|MAX))?";
+my $vmnmx = qr"(?:\.(?<MX>MX))?";
 my $x2x   = qr"\.(?<destSign>F|U|S)(?<destWidth>8|16|32|64)\.(?<srcSign>F|U|S)(?<srcWidth>8|16|32|64)";
 my $prmt  = qr"(?:\.(?<mode>F4E|B4E|RC8|ECL|ECR|RC16))?";
 my $shfl  = qr"\.(?<mode>IDX|UP|DOWN|BFLY)";
@@ -272,6 +273,10 @@ our %grammar =
     DSET     => [ { type => $cmpT,  code => 0x5900000000000000, rule => qr"^$pred?DSET$fcmp$bool $r0, $r8, $dr20, $p39;"o,            } ],
     DSETP    => [ { type => $cmpT,  code => 0x5b80000000000000, rule => qr"^$pred?DSETP$fcmp$bool $p3, $p0, $r8, $dr20, $p39;"o,      } ],
     FSWZADD  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?FSWZADD[^;]*;"o,                                    } ], #TODO
+
+    HADD2     => [ { type => $x32T,  code => 0x5d10000000000000, rule => qr"^$pred?HADD2$ftz $r0, $r8, $r20;"o,               } ],
+    HMUL2     => [ { type => $x32T,  code => 0x5d08000000000000, rule => qr"^$pred?HMUL2$ftz $r0, $r8, $r20;"o,               } ],
+    HFMA2     => [ { type => $x32T,  code => 0x5d00000000000000, rule => qr"^$pred?HFMA2$ftz $r0, $r8, $r20, $r39;"o,         } ],
 
     #Integer Instructions
     BFE       => [ { type => $shftT,  code => 0x5c01000000000000, rule => qr"^$pred?BFE$u32 $r0, $r8, $icr20;"o,                          } ],
@@ -405,11 +410,14 @@ our %grammar =
 
     #Video Instructions... TODO
     # Quick and dirty VADD for now.  Just added to get 100% cublas_device.lib coverage.
-    VADD   => [ { type => $x32T, code => 0x2044000000000000, rule => qr"^$pred?VADD$vaddType$sat$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
+    VADD   => [   { type => $shftT, code => 0x2044000000000000, rule => qr"^$pred?VADD$vaddType$sat$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
     VMAD   => [
-                { type => $x32T,  code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad16 $r0, $r8, $r20, $r39;"o, },
-                { type => $shftT, code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad8 $r0, $r8, $r20, $r39;"o, },
+                  { type => $x32T,  code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad16 $r0, $r8, $r20, $r39;"o, },
+                  { type => $shftT, code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad8 $r0, $r8, $r20, $r39;"o, },
               ],
+    VABSDIFF => [ { type => $shftT, code => 0x5427000000000000, rule => qr"^$pred?VABSDIFF$vaddType$sat$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
+    VMNMX    => [ { type => $shftT, code => 0x3a44000000000000, rule => qr"^$pred?VMNMX$vaddType$vmnmx$sat$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
+
 );
 
 # Create map of capture groups to op code flags that need to be added (or removed)
@@ -539,13 +547,13 @@ XMAD: r20part
 XMAD: r39part
 0x0010000000000000 H1
 
-VMAD, VADD: r8part
+VMAD, VADD, VABSDIFF, VMNMX: r8part
 0x0000001000000000 B1
 0x0000002000000000 B2
 0x0000003000000000 B3
 0x0000001000000000 H1
 
-VMAD, VADD: r20part
+VMAD, VADD, VABSDIFF, VMNMX: r20part
 0x0000000010000000 B1
 0x0000000020000000 B2
 0x0000000030000000 B3
@@ -559,35 +567,61 @@ VMAD
 0x0060000000000000 PO
 0x0080000000000000 SAT
 
-VADD
+VMNMX
+0x0100000000000000 MX
+
+VADD, VABSDIFF, VMNMX
 0x0080000000000000 SAT
 0x0040000000000000 UD
+0x0040000000000000 SD
 
 VADD: mode
+0x0020000000000000 ACC
+0x0028000000000000 MIN
+0x0030000000000000 MAX
 0x0000000000000000 MRG_16H
 0x0008000000000000 MRG_16L
 0x0010000000000000 MRG_8B0
 0x0000000000000000 MRG_8B1
 0x0018000000000000 MRG_8B2
 0x0000000000000000 MRG_8B3
+
+VABSDIFF: mode
+0x0003000000000000 ACC
+0x000b000000000000 MIN
+0x0013000000000000 MAX
+0x0023000000000000 MRG_16H
+0x002b000000000000 MRG_16L
+0x0033000000000000 MRG_8B0
+0x0000000000000000 MRG_8B1
+0x003b000000000000 MRG_8B2
+0x0000000000000000 MRG_8B3
+
+VMNMX: mode
 0x0020000000000000 ACC
 0x0028000000000000 MIN
 0x0030000000000000 MAX
+0x0000000000000000 MRG_16H
+0x0008000000000000 MRG_16L
+0x0010000000000000 MRG_8B0
+0x0000000000000000 MRG_8B1
+0x0018000000000000 MRG_8B2
+0x0000000000000000 MRG_8B3
 
-VMAD, VADD: sign1
+VMAD, VADD, VABSDIFF, VMNMX: sign1
 0x0000000000000000 U
 0x0001000000000000 S
 
-VMAD, VADD: sign2
+VMAD, VADD, VABSDIFF, VMNMX: sign2
 0x0000000000000000 U
 0x0002000000000000 S
 
-VMAD, VADD: size1
+VMAD, VADD, VABSDIFF, VMNMX: size1
 0x0000000000000000 8
 0x0000004000000000 16
 0x0000006000000000 32
 
-VMAD, VADD: size2
+VMAD, VADD, VABSDIFF, VMNMX: size2
 0x0000000000000000 8
 0x0000000040000000 16
 0x0000000060000000 32
@@ -702,6 +736,12 @@ FSET
 
 FSETP, FCMP
 0x0000800000000000 FTZ
+
+HADD2, HMUL2
+0x0000008000000000 FTZ
+
+HFMA2
+0x0000002000000000 FTZ
 
 FADD, FFMA, FMUL, F2F, I2I
 0x0004000000000000 SAT
