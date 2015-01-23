@@ -1,0 +1,65 @@
+.version 4.1
+.target sm_50
+.address_size 64
+
+// ptxas -v -arch=sm_50 -m 32 --opt-level 4 -o cublas_sgemm.cubin cublas_sgemm.ptx
+
+// You can use maxas to insert cublas_device.lib code into a cubin built from this ptx:
+
+// From C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v6.5\lib\Win32\cublas_device.lib
+
+// cuobjdump -lelf cublas_device.lib | find "sm_50"
+
+// cuobjdump -xelf maxwell_sgemm.asm.sm_50.cubin cublas_device.lib
+
+// maxas -l maxwell_sgemm.asm.sm_50.cubin
+
+// maxas -e -k maxwell_sgemm_128x128_nt maxwell_sgemm_128x128_nt.sass
+// maxas -e -k maxwell_sgemm_128x64_nt  maxwell_sgemm_128x64_nt.sass
+
+// maxas -i maxwell_sgemm_128x128_nt.sass cublas_sgemm.cubin
+// maxas -i maxwell_sgemm_128x64_nt.sass  cublas_sgemm.cubin
+
+// The sgemm.cpp code makes use of this cubin to benchmark the kernels outside of cublas.
+
+.visible .entry maxwell_sgemm_128x128_nt(
+	.param .u64 .ptr.global.align 8 param_A,
+	.param .u64 .ptr.global.align 8 param_B,
+	.param .u64 .ptr.global.align 8 param_C,
+	.param .s32 param_lda,
+	.param .s32 param_ldb,
+	.param .s32 param_ldc,
+	.param .s32 param_k,
+	.param .u64 .ptr.global.align 8 param_Alpha,
+	.param .u64 .ptr.global.align 8 param_Beta,
+	.param .s32 param_alpha,
+	.param .s32 param_beta,
+	.param .s32 param_flag
+)
+.reqntid 256
+{
+	.shared .align 16 .b8 share[16384];
+
+	ret;
+}
+
+.visible .entry maxwell_sgemm_128x64_nt(
+	.param .u64 .ptr.global.align 8 param_A,
+	.param .u64 .ptr.global.align 8 param_B,
+	.param .u64 .ptr.global.align 8 param_C,
+	.param .s32 param_lda,
+	.param .s32 param_ldb,
+	.param .s32 param_ldc,
+	.param .s32 param_k,
+	.param .u64 .ptr.global.align 8 param_Alpha,
+	.param .u64 .ptr.global.align 8 param_Beta,
+	.param .s32 param_alpha,
+	.param .s32 param_beta,
+	.param .s32 param_flag
+)
+.reqntid 128
+{
+	.shared .align 16 .b8 share[12288];
+
+	ret;
+}
