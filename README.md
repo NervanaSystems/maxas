@@ -1,4 +1,4 @@
-# maxas
+# MaxAs
 Assembler for NVIDIA Maxwell architecture
 
 See wiki pages for more information:
