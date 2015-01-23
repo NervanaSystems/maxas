@@ -8,4 +8,6 @@ See wiki pages for more information:
 - [Control Codes](https://github.com/NervanaSystems/maxas/wiki/Control-Codes)
 - [SGEMM walkthrough](https://github.com/NervanaSystems/maxas/wiki/SGEMM)
 
+This project is released under the MIT License.
+
 -- Scott Gray
