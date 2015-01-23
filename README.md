@@ -7,3 +7,5 @@ See wiki pages for more information:
 - [Getting Started](https://github.com/NervanaSystems/maxas/wiki/Getting-Started)
 - [Control Codes](https://github.com/NervanaSystems/maxas/wiki/Control-Codes)
 - [SGEMM walkthrough](https://github.com/NervanaSystems/maxas/wiki/SGEMM)
+
+-- Scott Gray
