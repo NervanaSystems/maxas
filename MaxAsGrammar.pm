@@ -77,6 +77,19 @@ sub getR
     }
     return $val << $pos;
 }
+sub getR255
+{
+    my ($val, $pos) = @_;
+    if ($val =~ m'^R(\d+|Z)$' && $1 < 255)
+    {
+        $val = $1 eq 'Z' ? 0 : $1^255;
+    }
+    else
+    {
+        die "Bad register name found: $val\n";
+    }
+    return $val << $pos;
+}
 sub getP
 {
     my ($val, $pos) = @_;
@@ -106,6 +119,7 @@ my %operands =
     r0      => sub { getR($_[0], 0)  },
     r8      => sub { getR($_[0], 8)  },
     r20     => sub { getR($_[0], 20) },
+    r28     => sub { getR255($_[0], 28) },
     r39s20  => sub { getR($_[0], 39) },
     r39     => sub { getR($_[0], 39) },
     r39a    => sub { getR($_[0], 39) }, # does not modify op code, xor the r39 value again to whipe it out, register must be in sequence with r20
@@ -150,6 +164,8 @@ my $p45     = qr"(?<p45>$p)"o;
 my $p48     = qr"(?<p48>$p)"o;
 my $p58     = qr"(?<p58>$p)"o;
 my $r0      = qr"(?<r0>$reg)";
+my $chnls   = qr"(?<chnls>R|RGBA)";
+my $r28      = qr"(?<r28>$reg)";
 my $r0cc    = qr"(?<r0>$reg)(?<CC>\.CC)?";
 my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1|B1|B2|B3))?(?<reuse1>\.reuse)?";
 my $r20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r20>$reg)\|?(?:\.(?<r20part>H0|H1|B1|B2|B3))?(?<reuse2>\.reuse)?";
@@ -344,7 +360,7 @@ our %grammar =
     #Texture Instructions
     # Handle the commonly used 1D texture functions.. but save the others for later
     TLD    => [ { type => $gmemT, code => 0xdd38000000000000, rule => qr"^$pred?TLD\.B\.LZ\.$tld $r0, $r8, $r20, $hex, \dD, $i31w4;"o, } ], #Partial
-    TLDS   => [ { type => $gmemT, code => 0xda00000ffff00000, rule => qr"^$pred?TLDS\.LZ\.$tld RZ, $r0, $r8, $i36w20, \dD, R;"o,       } ], #Partial
+    TLDS   => [ { type => $gmemT, code => 0xda00000ffff00000, rule => qr"^$pred?TLDS\.LZ\.$tld $r28, $r0, $r8, $i36w20, \dD, $chnls;"o,       } ], #Partial
     TEX    => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TEX[^;]*;"o,   } ], #TODO
     TLD4   => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TLD4[^;]*;"o,  } ], #TODO
     TXQ    => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TXQ[^;]*;"o,   } ], #TODO
@@ -910,6 +926,9 @@ LDG, STG, LDS, STS, LDL, STL, LDC
 
 LDS
 0x0000100000000000 U
+
+TLDS: chnls
+0x0010000000000000 RGBA
 
 RED: type
 0x0000000000000000
