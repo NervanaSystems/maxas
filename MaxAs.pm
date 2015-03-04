@@ -423,9 +423,11 @@ sub Assemble
                 my $val = substr $capData->{$r}, 1;
 
                 my @r0 = getVecRegisters($vectors, $capData);
+                my @r8 = getAddrVecRegisters($vectors, $capData);
 
                 # smart enough to count vector registers for memory instructions.
                 my $regInc = $r eq 'r0' ? scalar(@r0) || 1 : 1;
+                my $regInc = $r eq 'r8' ? scalar(@r8) || 1 : 1;
 
                 if ($val + $regInc > $regCnt)
                 {
@@ -873,11 +875,13 @@ sub Scheduler
                     # add the value to list with the correct prefix
                     push @$list,
                         $operand eq 'r0' ? getVecRegisters($vectors, $capData) :
+                        $operand eq 'r8' ? getAddrVecRegisters($vectors, $capData) :
                         $operand eq 'CC' ? 'CC' :
                         $operand eq 'X'  ? 'CC' :
                         $capData->{$operand};
                 }
             }
+            $instruct->{const} = 1 if exists($capData->{c20}) || exists($capData->{c39});
 
             # Find Read-After-Write dependencies
             foreach my $src (grep { exists $writes{$_} } @src)
@@ -1029,7 +1033,9 @@ sub Scheduler
                 $stall = $ready->{tput} if $stall < $ready->{tput};
             }
             # dual issue with a simple instruction (tput <= 2)
-            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} <= 2 && $stall == 1 && $ready->{exeTime} <= $clock)
+            # can't dual issue two instructions that both load a constant
+            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} <= 2 && 
+                   $stall == 1 && $ready->{exeTime} <= $clock && !($ready->{const} && $instruct->{const}))
             {
                 $stall = 0;
             }

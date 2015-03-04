@@ -10,7 +10,7 @@ our @EXPORT = qw(
     %grammar %flags
     parseInstruct genCode genReuseCode
     processAsmLine processSassLine processSassCtrlLine
-    replaceXMADs printCtrl readCtrl getVecRegisters
+    replaceXMADs printCtrl readCtrl getVecRegisters getAddrVecRegisters
 );
 
 require 5.10.0;
@@ -50,8 +50,13 @@ sub getI
 sub getF
 {
     my ($val, $pos, $type, $trunc) = @_;
+    # hexidecial value
+    if ($val  =~ m'^0x[0-9a-zA-Z]+')
+    {
+        $val = hex($val);
+    }
     # support infinity
-    if ($val =~ m'INF'i)
+    elsif ($val =~ m'INF'i)
     {
         $val = $trunc ? ($type eq 'f' ? 0x7f800 : 0x7ff00) : 0x7f800000;
     }
@@ -70,19 +75,6 @@ sub getR
     if ($val =~ m'^R(\d+|Z)$' && $1 < 255)
     {
         $val = $1 eq 'Z' ? 0xff : $1;
-    }
-    else
-    {
-        die "Bad register name found: $val\n";
-    }
-    return $val << $pos;
-}
-sub getR255
-{
-    my ($val, $pos) = @_;
-    if ($val =~ m'^R(\d+|Z)$' && $1 < 255)
-    {
-        $val = $1 eq 'Z' ? 0 : $1^255;
     }
     else
     {
@@ -119,7 +111,7 @@ my %operands =
     r0      => sub { getR($_[0], 0)  },
     r8      => sub { getR($_[0], 8)  },
     r20     => sub { getR($_[0], 20) },
-    r28     => sub { getR255($_[0], 28) },
+    r28     => sub { getR($_[0], 28) },
     r39s20  => sub { getR($_[0], 39) },
     r39     => sub { getR($_[0], 39) },
     r39a    => sub { getR($_[0], 39) }, # does not modify op code, xor the r39 value again to whipe it out, register must be in sequence with r20
@@ -164,19 +156,18 @@ my $p45     = qr"(?<p45>$p)"o;
 my $p48     = qr"(?<p48>$p)"o;
 my $p58     = qr"(?<p58>$p)"o;
 my $r0      = qr"(?<r0>$reg)";
-my $chnls   = qr"(?<chnls>R|RGBA)";
-my $r28      = qr"(?<r28>$reg)";
 my $r0cc    = qr"(?<r0>$reg)(?<CC>\.CC)?";
 my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1|B1|B2|B3))?(?<reuse1>\.reuse)?";
 my $r20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r20>$reg)\|?(?:\.(?<r20part>H0|H1|B1|B2|B3))?(?<reuse2>\.reuse)?";
+my $r28     = qr"(?<r28>$reg)";
 my $r39s20  = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r39s20>(?<r20>$reg))\|?(?:\.(?<r39part>H0|H1))?(?<reuse2>\.reuse)?";
 my $r39     = qr"(?<r39neg>\-)?(?<r39>$reg)(?:\.(?<r39part>H0|H1))?(?<reuse3>\.reuse)?";
 my $r39a    = qr"(?<r39a>(?<r39>$reg))(?<reuse3>\.reuse)?";
-my $c20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?c\[(?<c34>$hex)\]\s*\[(?<c20>$hex)\]\|?"o;
+my $c20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?c\[(?<c34>$hex)\]\s*\[(?<c20>$hex)\]\|?(?:\.(?<r20part>H0|H1|B1|B2|B3))?"o;
 my $c20s39  = qr"(?<r39neg>\-)?c\[(?<c34>$hex)\]\s*\[(?<c39>$hex)\]"o;
-my $f20w32  = qr"(?<f20w32>(?:\-|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))";
-my $f20     = qr"(?<f20>(?:(?<neg>\-)|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))(?<r20neg>\.NEG)?";
-my $d20     = qr"(?<d20>(?:(?<neg>\-)|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))(?<r20neg>\.NEG)?";
+my $f20w32  = qr"(?<f20w32>(?:\-|\+|)(?i:$hex|inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))";
+my $f20     = qr"(?<f20>(?:(?<neg>\-)|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))(?<r20neg>\.NEG)?"o;
+my $d20     = qr"(?<d20>(?:(?<neg>\-)|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))(?<r20neg>\.NEG)?"o;
 my $i8w4    = qr"(?<i8w4>$immed)"o;
 my $i20     = qr"(?<i20>(?<neg>\-)?$immed)(?<r20neg>\.NEG)?"o;
 my $i20w8   = qr"(?<i20w8>$immed)"o;
@@ -215,6 +206,7 @@ my $add3  = qr"(?:\.(?<type>X|RS|LS))?";
 my $lopz  = qr"(?:\.(?<z>NZ|Z) $p48,|(?<noz>))"o;
 my $X     = qr"(?<X>\.X)?";
 my $tld   = qr"(?<reuse1>T)|(?<reuse2>P)";
+my $chnls = qr"(?<chnls>R|RGBA)";
 my $sr    = qr"SR_(?<sr>\S+)";
 my $shf   = qr"(?<W>\.W)?(?:\.(?<type>U64|S64))?(?<HI>\.HI)?";
 my $xmad  = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<mode>MRG|PSL|CHI|CLO|CSFU))?(?<CBCC>\.CBCC)?";
@@ -275,7 +267,7 @@ our %grammar =
                   { type => $x32T,  code => 0x5980000000000000, rule => qr"^$pred?FFMA$ftz$rnd$sat $r0, $r8, $fcr20, $r39;"o,         },
                   { type => $x32T,  code => 0x5980000000000000, rule => qr"^$pred?FFMA$ftz$rnd$sat $r0, $r8, $r39s20, $c20s39;"o,     },
                 ],
-    FMNMX    => [ { type => $x32T,  code => 0x5c60000000000000, rule => qr"^$pred?FMNMX$ftz $r0, $r8, $fcr20, $p39;"o,                } ],
+    FMNMX    => [ { type => $cmpT,  code => 0x5c60000000000000, rule => qr"^$pred?FMNMX$ftz $r0, $r8, $fcr20, $p39;"o,                } ],
     FMUL     => [ { type => $x32T,  code => 0x5c68000000000000, rule => qr"^$pred?FMUL$ftz$rnd$sat $r0, $r8, $fcr20;"o,               } ],
     FMUL32I  => [ { type => $x32T,  code => 0x1e00000000000000, rule => qr"^$pred?FMUL32I$ftz $r0, $r8, $f20w32;"o,                   } ],
     FSET     => [ { type => $cmpT,  code => 0x5800000000000000, rule => qr"^$pred?FSET$fcmp$ftz$bool $r0, $r8, $fcr20, $p39;"o,       } ],
@@ -326,12 +318,11 @@ our %grammar =
                  ],
     SHL       => [ { type => $shftT,  code => 0x5c48000000000000, rule => qr"^$pred?SHL(?<W>\.W)? $r0, $r8, $icr20;"o,                    } ],
     SHR       => [ { type => $shftT,  code => 0x5c29000000000000, rule => qr"^$pred?SHR$u32 $r0, $r8, $icr20;"o,                          } ],
-    # x32T is probably the main type for XMAD, but this needs thorough investigation..
     XMAD      => [
                    { type => $x32T,   code => 0x5b00000000000000, rule => qr"^$pred?XMAD$xmad $r0cc, $r8, $ir20, $r39;"o,                 },
                    { type => $x32T,   code => 0x5900000000000000, rule => qr"^$pred?XMAD$xmad $r0cc, $r8, $r39s20, $c20s39;"o,            },
                  ],
-    # I think XMAD largely replaces these
+    # XMAD replaces these
     IMAD      => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMAD[^;]*;"o,   } ], #TODO
     IMADSP    => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMADSP[^;]*;"o, } ], #TODO
     IMUL      => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMUL[^;]*;"o,   } ], #TODO
@@ -360,7 +351,7 @@ our %grammar =
     #Texture Instructions
     # Handle the commonly used 1D texture functions.. but save the others for later
     TLD    => [ { type => $gmemT, code => 0xdd38000000000000, rule => qr"^$pred?TLD\.B\.LZ\.$tld $r0, $r8, $r20, $hex, \dD, $i31w4;"o, } ], #Partial
-    TLDS   => [ { type => $gmemT, code => 0xda00000ffff00000, rule => qr"^$pred?TLDS\.LZ\.$tld $r28, $r0, $r8, $i36w20, \dD, $chnls;"o,       } ], #Partial
+    TLDS   => [ { type => $gmemT, code => 0xda0000000ff00000, rule => qr"^$pred?TLDS\.LZ\.$tld $r28, $r0, $r8, $i36w20, \dD, $chnls;"o,} ], #Partial
     TEX    => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TEX[^;]*;"o,   } ], #TODO
     TLD4   => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TLD4[^;]*;"o,  } ], #TODO
     TXQ    => [ { type => $gmemT, code => 0x0000000000000000, rule => qr"^$pred?TXQ[^;]*;"o,   } ], #TODO
@@ -424,8 +415,7 @@ our %grammar =
     VOTE   => [ { type => $x32T,  code => 0x50d8000000000000, rule => qr"^$pred?VOTE$vote (?:$r0, |(?<nor0>))$p45, $p39;"o, } ],
     R2B    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?R2B[^;]*;"o,                                } ], #TODO
 
-    #Video Instructions... TODO
-    # Quick and dirty VADD for now.  Just added to get 100% cublas_device.lib coverage.
+    #Video Instructions... Need to finish
     VADD   => [   { type => $shftT, code => 0x2044000000000000, rule => qr"^$pred?VADD$vaddType$sat$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
     VMAD   => [
                   { type => $x32T,  code => 0x5f04000000000000, rule => qr"^$pred?VMAD$vmad16 $r0, $r8, $r20, $r39;"o, },
@@ -434,6 +424,7 @@ our %grammar =
     VABSDIFF => [ { type => $shftT, code => 0x5427000000000000, rule => qr"^$pred?VABSDIFF$vaddType$sat$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
     VMNMX    => [ { type => $shftT, code => 0x3a44000000000000, rule => qr"^$pred?VMNMX$vaddType$vmnmx$sat$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
 
+    VSET => [ { type => $shftT, code => 0x4004000000000000, rule => qr"^$pred?VSET$icmp$vaddType$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
 );
 
 # Create map of capture groups to op code flags that need to be added (or removed)
@@ -563,13 +554,13 @@ XMAD: r20part
 XMAD: r39part
 0x0010000000000000 H1
 
-VMAD, VADD, VABSDIFF, VMNMX: r8part
+VMAD, VADD, VABSDIFF, VMNMX, VSET: r8part
 0x0000001000000000 B1
 0x0000002000000000 B2
 0x0000003000000000 B3
 0x0000001000000000 H1
 
-VMAD, VADD, VABSDIFF, VMNMX: r20part
+VMAD, VADD, VABSDIFF, VMNMX, VSET: r20part
 0x0000000010000000 B1
 0x0000000020000000 B2
 0x0000000030000000 B3
@@ -591,7 +582,15 @@ VADD, VABSDIFF, VMNMX
 0x0040000000000000 UD
 0x0040000000000000 SD
 
-VADD: mode
+VSET: cmp
+0x0040000000000000 LT
+0x0080000000000000 EQ
+0x00c0000000000000 LE
+0x0100000000000000 GT
+0x0140000000000000 NE
+0x0180000000000000 GE
+
+VADD, VSET: mode
 0x0020000000000000 ACC
 0x0028000000000000 MIN
 0x0030000000000000 MAX
@@ -624,20 +623,20 @@ VMNMX: mode
 0x0018000000000000 MRG_8B2
 0x0000000000000000 MRG_8B3
 
-VMAD, VADD, VABSDIFF, VMNMX: sign1
+VMAD, VADD, VABSDIFF, VMNMX, VSET: sign1
 0x0000000000000000 U
 0x0001000000000000 S
 
-VMAD, VADD, VABSDIFF, VMNMX: sign2
+VMAD, VADD, VABSDIFF, VMNMX, VSET: sign2
 0x0000000000000000 U
 0x0002000000000000 S
 
-VMAD, VADD, VABSDIFF, VMNMX: size1
+VMAD, VADD, VABSDIFF, VMNMX, VSET: size1
 0x0000000000000000 8
 0x0000004000000000 16
 0x0000006000000000 32
 
-VMAD, VADD, VABSDIFF, VMNMX: size2
+VMAD, VADD, VABSDIFF, VMNMX, VSET: size2
 0x0000000000000000 8
 0x0000000040000000 16
 0x0000000060000000 32
@@ -668,6 +667,9 @@ IADD
 IADD, ISCADD
 0x0002000000000000 r8neg
 0x0001000000000000 r20neg
+
+IADD32I
+0x0100000000000000 r8neg
 
 DEPBAR
 0x0000000000000001 db0
@@ -927,14 +929,12 @@ LDG, STG, LDS, STS, LDL, STL, LDC
 LDS
 0x0000100000000000 U
 
-TLDS: chnls
-0x0010000000000000 RGBA
-
 RED: type
 0x0000000000000000
 0x0000000000100000 .S32
 0x0000000000200000 .U64
 0x0000000000300000 .F32.FTZ.RN
+0x0000000000400000 .F16x2.FTZ.RN
 0x0000000000500000 .S64
 
 RED: mode
@@ -1214,32 +1214,24 @@ sub replaceXMADs
 # XMAD.PSL.CBCC d, a.H1, x.H1, d;
 # ----------------------
 # XMAD d, a, 0xffff, c;
-# XMAD.PSL.CBCC d, a.H1, 0xffff, d;
-    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?:(?<bi>-?$immed)|(?<br>\w+))\s*,\s*(?<c>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<x>\w+)\s*;$CommRe/
+# XMAD.PSL d, a.H1, 0xffff, d;
+    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>\w+)\s*,\s*(?<c>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<x>\w+)\s*;$CommRe/
 
-        my $replace;
-        if (exists $+{br})
-        {
-            die "XMAD.LO: Destination and first operand cannot be the same register ($+{d})." if $+{d} eq $+{a};
-            $replace = sprintf '
+        die "XMAD.LO: Destination and first operand cannot be the same register ($+{d})." if $+{d} eq $+{a};
+        sprintf '
 %1$s%2$s%3$sXMAD.MRG %8$s, %5$s, %6$s.H1, RZ;%9$s
 %1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;
 %1$s%2$s%3$sXMAD.PSL.CBCC %4$s, %5$s.H1, %8$s.H1, %4$s;',
-                @+{qw(ctrl space pred d a br c x comment)}
-        }
-        # immediate must be <= 0xffff
-        elsif (getI($+{bi}, 0, 0xffffffff) <= 0xffff)
-        {
-             $replace = sprintf '
-%1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;
-%1$s%2$s%3$sXMAD.PSL.CBCC %4$s, %5$s.H1, %6$s, %4$s;',
-                @+{qw(ctrl space pred d a bi c x comment)}
-        }
-        else
-        {
-             die "Error at:\n$&\n\nImmediates for XMAD.LO must be <= 0xffff.\nUse a MOV32I prior to this instruction as a work around.\n";
-        }
-        $replace;
+                @+{qw(ctrl space pred d a b c x comment)}
+    /egmos;
+
+    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO2\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>-?$immed|\w+)\s*,\s*(?<c>c\[$hex\]\[$hex\]|\w+)\s*;$CommRe/
+
+        die "XMAD.LO2: Destination and first operand cannot be the same register ($+{d})." if $+{d} eq $+{a};
+        sprintf '
+%1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;%8$s
+%1$s%2$s%3$sXMAD.PSL %4$s, %5$s.H1, %6$s, %4$s;',
+            @+{qw(ctrl space pred d a b c comment)}
     /egmos;
 
     #TODO: add more XMAD macros
@@ -1317,6 +1309,24 @@ sub getVecRegisters
         }
         confess "$regName not a 128bit vector register" unless exists($vectors->{$regName}) && @{$vectors->{$regName}} == 4;
         return @{$vectors->{$regName}};
+    }
+    return $regName;
+}
+
+sub getAddrVecRegisters
+{
+    my ($vectors, $capData) = @_;
+    my $regName = $capData->{r8} or return;
+    return if $regName eq 'RZ';
+
+    if (exists $capData->{E})
+    {
+        if ($regName =~ m'^R(\d+)$')
+        {
+            return map "R$_", ($1 .. $1+1);
+        }
+        confess "$regName not a 64bit vector register" unless exists $vectors->{$regName};
+        return @{$vectors->{$regName}}[0,1];
     }
     return $regName;
 }

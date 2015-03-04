@@ -112,7 +112,21 @@ elsif ($mode =~ /^\-?\-e/i)
 # Insert the kernel asm back into the cubin:
 elsif ($mode =~ /^\-?\-i/i)
 {
+    my $kernelName;
+    if ($ARGV[0] =~ /^\-?\-k/i)
+    {
+        shift;
+        $kernelName = shift or usage();
+    }
     my $noReuse   = shift if $ARGV[0] =~ /^\-?\-n/i;
+    while ($ARGV[0] =~ /^\-?\-D(\w+)/)
+    {
+        shift;
+        my $name  = $1;
+        my $value = shift;
+        eval "package MaxAs::CODE; our \$$name = $value;"
+    }
+
     my $asmFile   = shift or usage();
     my $cubinFile = shift or usage();
     my $newCubin  = shift || $cubinFile;
@@ -127,7 +141,7 @@ elsif ($mode =~ /^\-?\-i/i)
     else { die "$asmFile: $!" }
 
     # extract the kernel name from the file
-    my ($kernelName) = $file =~ /^# Kernel: (\w+)/;
+    ($kernelName) = $file =~ /^# Kernel: (\w+)/ unless $kernelName;
     die "asm file missing kernel name or is badly formatted" unless $kernelName;
 
     my $kernel = MaxAs::Assemble($file, !$noReuse);
@@ -146,6 +160,13 @@ elsif ($mode =~ /^\-?\-i/i)
 # Preprocessing:
 elsif ($mode =~ /^\-?\-p/i)
 {
+    while ($ARGV[0] =~ /^\-?\-D(\w+)/)
+    {
+        shift;
+        my $name  = $1;
+        my $value = shift;
+        eval "package MaxAs::CODE; our \$$name = $value;"
+    }
     my $debug     = shift if $ARGV[0] =~ /^\-?\-d/i;
     my $asmFile   = shift or usage();
     my $asmFile2  = shift;
