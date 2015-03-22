@@ -164,6 +164,7 @@ my $r39s20  = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r39s20>(?<r20>$reg))\|?(?:\.(?<r
 my $r39     = qr"(?<r39neg>\-)?(?<r39>$reg)(?:\.(?<r39part>H0|H1))?(?<reuse3>\.reuse)?";
 my $r39a    = qr"(?<r39a>(?<r39>$reg))(?<reuse3>\.reuse)?";
 my $c20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?c\[(?<c34>$hex)\]\s*\[(?<c20>$hex)\]\|?(?:\.(?<r20part>H0|H1|B1|B2|B3))?"o;
+my $c20x    = qr"(?<r20neg>\-)?(?<r20abs>\|)?c\[(?<c34>$hex)\]\s*\[(?<c20>$hex)\]\|?(?:\.(?<r20partx>H0|H1|B1|B2|B3))?"o;
 my $c20s39  = qr"(?<r39neg>\-)?c\[(?<c34>$hex)\]\s*\[(?<c39>$hex)\]"o;
 my $f20w32  = qr"(?<f20w32>(?:\-|\+|)(?i:$hex|inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))";
 my $f20     = qr"(?<f20>(?:(?<neg>\-)|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))(?<r20neg>\.NEG)?"o;
@@ -210,6 +211,7 @@ my $chnls = qr"(?<chnls>R|RGBA)";
 my $sr    = qr"SR_(?<sr>\S+)";
 my $shf   = qr"(?<W>\.W)?(?:\.(?<type>U64|S64))?(?<HI>\.HI)?";
 my $xmad  = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<mode>MRG|PSL|CHI|CLO|CSFU))?(?<CBCC>\.CBCC)?";
+my $xmadc = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<modec>MRG|PSL|CHI|CLO|CSFU))?(?<CBCC>\.CBCC)?";
 my $vmad8 = qr"\.(?<sign1>[SU])(?<size1>8|16)\.(?<sign2>[SU])(?<size2>8|16)(?<PO>\.PO)?(?<SHR_7>\.SHR_7)?(?<SHR_15>\.SHR_15)?(?<SAT>\.SAT)?";
 my $vmad16= qr"\.(?<sign1>[SU])(?<size1>16)\.(?<sign2>[SU])(?<size2>16)";
 my $hilo  = qr"(?:\.(?<mode>XHI|XLO))?";
@@ -291,7 +293,7 @@ our %grammar =
     BFI       => [ { type => $shftT,  code => 0x5bf0000000000000, rule => qr"^$pred?BFI $r0, $r8, $ir20, $cr39;"o,                        } ],
     FLO       => [ { type => $s2rT,   code => 0x5c30000000000000, rule => qr"^$pred?FLO\.U32 $r0, $icr20;"o,                              } ],
     IADD      => [ { type => $x32T,   code => 0x5c10000000000000, rule => qr"^$pred?IADD$sat$X $r0cc, $r8, $icr20;"o,                         } ],
-    IADD32I   => [ { type => $x32T,   code => 0x1c00000000000000, rule => qr"^$pred?IADD32I $r0cc, $r8, $i20w32;"o,                         } ],
+    IADD32I   => [ { type => $x32T,   code => 0x1c00000000000000, rule => qr"^$pred?IADD32I$X $r0cc, $r8, $i20w32;"o,                         } ],
     IADD3     => [ { type => $x32T,   code => 0x5cc0000000000000, rule => qr"^$pred?IADD3$add3 $r0cc, $r8, $icr20, $r39;"o,                 } ],
     ICMP      => [ { type => $cmpT,   code => 0x5b41000000000000, rule => qr"^$pred?ICMP$icmp$u32 $r0, $r8, $icr20, $r39;"o,              } ],
     IMNMX     => [ { type => $shftT,  code => 0x5c21000000000000, rule => qr"^$pred?IMNMX$u32$hilo $r0cc, $r8, $icr20, $p39;"o,                  } ],
@@ -321,6 +323,7 @@ our %grammar =
     XMAD      => [
                    { type => $x32T,   code => 0x5b00000000000000, rule => qr"^$pred?XMAD$xmad $r0cc, $r8, $ir20, $r39;"o,                 },
                    { type => $x32T,   code => 0x5900000000000000, rule => qr"^$pred?XMAD$xmad $r0cc, $r8, $r39s20, $c20s39;"o,            },
+                   { type => $x32T,   code => 0x5e00000000000000, rule => qr"^$pred?XMAD$xmadc $r0cc, $r8, $c20x, $r39;"o,                  },
                  ],
     # XMAD replaces these
     IMAD      => [ { type => $x32T,   code => 0x0000000000000000, rule => qr"^$pred?IMAD[^;]*;"o,   } ], #TODO
@@ -542,6 +545,15 @@ XMAD: mode
 0x0004000000000000 CLO
 0x000c000000000000 CSFU
 
+XMAD: modec
+0x0100000000000000 MRG
+0x0000001000000000 PSL
+0x0008000000000000 CHI
+0x0004000000000000 CLO
+0x000c000000000000 CSFU
+
+
+
 XMAD
 0x0010000000000000 CBCC
 
@@ -550,6 +562,9 @@ XMAD: r8part
 
 XMAD: r20part
 0x0000000800000000 H1
+
+XMAD: r20partx
+0x0010000000000000 H1
 
 XMAD: r39part
 0x0010000000000000 H1
@@ -670,6 +685,7 @@ IADD, ISCADD
 
 IADD32I
 0x0100000000000000 r8neg
+0x0020000000000000 X
 
 DEPBAR
 0x0000000000000001 db0
