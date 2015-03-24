@@ -278,7 +278,9 @@ sub new
                 $paramSec->{ParamData} = \@data;
 
                 # InsCnt is the number of non-control instructions of a kernel (not including final EXIT, BRA and NOP instuctions)
-                #TODO: this logic is sometimes wrong.. but it turns out you don't need to modify this value to edit a kernel
+                # TODO: this logic is sometimes wrong.. but it turns out you don't need to modify this value to edit a kernel
+                # The correct logic should be looking for the 0x00041c04 or 0x000c1c04 sentinal value near the end of the params
+                # Then pull the following value.  Still not sure how that value exactly relates to the kernel size.
                 $kernelSec->{InsCnt}   = $data[$#data-2] / 8; # the value is stored as a size
 
                 # Find the first param delimiter
