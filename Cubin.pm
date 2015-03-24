@@ -272,9 +272,13 @@ sub new
             {
                 # Extract raw param data
                 my @data = unpack "L*", pack "H*", $paramSec->{Data}; #map { sprintf '0x%08x', $_ }
+                #print Dumper(\@data);
+                #exit();
+
                 $paramSec->{ParamData} = \@data;
 
                 # InsCnt is the number of non-control instructions of a kernel (not including final EXIT, BRA and NOP instuctions)
+                #TODO: this logic is sometimes wrong.. but it turns out you don't need to modify this value to edit a kernel
                 $kernelSec->{InsCnt}   = $data[$#data-2] / 8; # the value is stored as a size
 
                 # Find the first param delimiter
@@ -365,14 +369,15 @@ sub modifyKernel
         $kernelSec->{flags} &= ~0x01f00000;
         $kernelSec->{flags} |=  $newBar << 20;
     }
-    if ($newCnt != $kernelSec->{InsCnt})
-    {
-        print "Modified $kernelName InsCnt: $kernelSec->{InsCnt} => $newCnt\n";
-        $kernelSec->{InsCnt} = $newCnt;
-        my $data = $paramSec->{ParamData};
-        $data->[$#$data-2] = $newCnt * 8;
-        $paramSec->{Data} = unpack "H*", pack "L*", @$data;
-    }
+    # This logic is sometimes wrong but it's not required to modify to get the kernel working
+    #if ($newCnt != $kernelSec->{InsCnt})
+    #{
+    #    print "Modified $kernelName InsCnt: $kernelSec->{InsCnt} => $newCnt\n";
+    #    $kernelSec->{InsCnt} = $newCnt;
+    #    my $data = $paramSec->{ParamData};
+    #    $data->[$#$data-2] = $newCnt * 8;
+    #    $paramSec->{Data} = unpack "H*", pack "L*", @$data;
+    #}
     if ($newSize != $kernelSec->{size})
     {
         print "Modified $kernelName Size: $kernelSec->{size} => $newSize\n";
