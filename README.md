@@ -3,7 +3,7 @@ Assembler for NVIDIA Maxwell architecture
 
 To install (system-wide):
 
-    sudo cpanm https://github.com/NervanaSystems/maxas.git
+    sudo cpanm git://github.com/NervanaSystems/maxas.git
 
 or
 
