@@ -1,4 +1,4 @@
-package Cubin;
+package MaxAs::Cubin;
 
 use strict;
 use Data::Dumper;

@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
-use Cubin;
-use MaxAs;
+use MaxAs::Cubin;
+use MaxAs::MaxAs;
 use Data::Dumper;
 
 require 5.10.0;
@@ -15,7 +15,7 @@ if ($mode =~ /^\-?\-l/i)
 {
     my $cubinFile = shift or usage();
 
-    my $cubin = Cubin->new($cubinFile);
+    my $cubin = MaxAs::Cubin->new($cubinFile);
 
     my $kernels = $cubin->listKernels;
     my $symbols = $cubin->listSymbols;
@@ -44,7 +44,7 @@ elsif ($mode =~ /^\-?\-t/i)
     # cubin file
     else
     {
-        my $cubin = Cubin->new($file);
+        my $cubin = MaxAs::Cubin->new($file);
         my $arch  = $cubin->arch;
 
         open $fh, "cuobjdump -arch sm_$arch -sass $file |" or die "cuobjdump -arch sm_$arch -sass $file: $!";
@@ -55,7 +55,7 @@ elsif ($mode =~ /^\-?\-t/i)
             exit(1);
         }
     }
-    exit(MaxAs::Test($fh, $reg, $all) ? 1 : 0);
+    exit(MaxAs::MaxAs::Test($fh, $reg, $all) ? 1 : 0);
 }
 # Extract an asm file containing the desired kernel
 elsif ($mode =~ /^\-?\-e/i)
@@ -68,7 +68,7 @@ elsif ($mode =~ /^\-?\-e/i)
     }
     my $cubinFile = shift or usage();
     my $asmFile   = shift;
-    my $cubin     = Cubin->new($cubinFile);
+    my $cubin     = MaxAs::Cubin->new($cubinFile);
     my $arch      = $cubin->arch;
     my $kernels   = $cubin->listKernels;
 
@@ -104,7 +104,7 @@ elsif ($mode =~ /^\-?\-e/i)
 
     print $out "#\n# Instructions:\n\n";
 
-    MaxAs::Extract($in, $out, $kernel->{Params});
+    MaxAs::MaxAs::Extract($in, $out, $kernel->{Params});
 
     close $out if $asmFile;
     close $in;
@@ -124,7 +124,7 @@ elsif ($mode =~ /^\-?\-i/i)
         shift;
         my $name  = $1;
         my $value = shift;
-        eval "package MaxAs::CODE; our \$$name = $value;"
+        eval "package MaxAs::MaxAs::CODE; our \$$name = $value;"
     }
 
     my $asmFile   = shift or usage();
@@ -144,9 +144,9 @@ elsif ($mode =~ /^\-?\-i/i)
     ($kernelName) = $file =~ /^# Kernel: (\w+)/ unless $kernelName;
     die "asm file missing kernel name or is badly formatted" unless $kernelName;
 
-    my $kernel = MaxAs::Assemble($file, !$noReuse);
+    my $kernel = MaxAs::MaxAs::Assemble($file, !$noReuse);
 
-    my $cubin  = Cubin->new($cubinFile);
+    my $cubin  = MaxAs::Cubin->new($cubinFile);
     $kernel->{Kernel} = $cubin->getKernel($kernelName) or die "cubin does not contain kernel: $kernelName";
 
     $cubin->modifyKernel(%$kernel);
@@ -165,7 +165,7 @@ elsif ($mode =~ /^\-?\-p/i)
         shift;
         my $name  = $1;
         my $value = shift;
-        eval "package MaxAs::CODE; our \$$name = $value;"
+        eval "package MaxAs::MaxAs::CODE; our \$$name = $value;"
     }
     my $debug     = shift if $ARGV[0] =~ /^\-?\-d/i;
     my $asmFile   = shift or usage();
@@ -186,7 +186,7 @@ elsif ($mode =~ /^\-?\-p/i)
     {
         $fh = \*STDOUT;
     }
-    print $fh MaxAs::Preprocess($file, $debug);
+    print $fh MaxAs::MaxAs::Preprocess($file, $debug);
     close $fh;
 }
 else
