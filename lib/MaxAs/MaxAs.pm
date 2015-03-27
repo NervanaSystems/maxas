@@ -1,11 +1,13 @@
-package MaxAs;
+package MaxAs::MaxAs;
+
+require 5.10.0;
 
 use strict;
 use Data::Dumper;
-use MaxAsGrammar;
+use MaxAs::MaxAsGrammar;
 use Carp;
 
-require 5.10.0;
+our $VERSION = '1.01';
 
 # these ops need to be converted from absolute addresses to relative in the sass output by cuobjdump
 my %relOffset  = map { $_ => 1 } qw(BRA SSY CAL PBK PCNT);
@@ -1304,5 +1306,49 @@ sub registerHealth
 
 __END__
 
+=head1 NAME
+
+MaxAs::MaxAs - Assembler for NVIDIA Maxwell architecture 
+
+=head1 SYNOPSIS
+
+    maxas.pl [opts]
+
+=head1 DESCRIPTION
+
+See the documentation at: https://github.com/NervanaSystems/maxas
+
+=head1 SEE ALSO
+
+See the documentation at: https://github.com/NervanaSystems/maxas
 
 
+=head1 AUTHOR
+
+Scott Gray, E<lt>sgray@nervanasys.com<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+The MIT License (MIT)
+
+Copyright (c) 2014 Scott Gray
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+=cut

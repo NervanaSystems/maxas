@@ -1,4 +1,4 @@
-package MaxAsGrammar;
+package MaxAs::MaxAsGrammar;
 
 use strict;
 use Carp;
