@@ -748,7 +748,7 @@ sub Preprocess
     $file =~ s|$CommentRe||g;
 
     # Execute the CODE sections
-    $file =~ s|$CodeRe| my $out = eval "package MaxAs::CODE; $1"; $@ ? die("CODE:\n$1\n\nError: $@\n") : $out |eg;
+    $file =~ s|$CodeRe| my $out = eval "package MaxAs::MaxAs::CODE; $1"; $@ ? die("CODE:\n$1\n\nError: $@\n") : $out |eg;
 
     #Pull in the constMap
     $file =~ s/$ConstMapRe/ setConstMap($constMap, $1) /eg;
