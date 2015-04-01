@@ -189,6 +189,11 @@ elsif ($mode =~ /^\-?\-p/i)
     print $fh MaxAs::MaxAs::Preprocess($file, $debug);
     close $fh;
 }
+# get version information
+elsif ($mode =~ /^\-?\-v/i)
+{
+    print "$MaxAs::MaxAs::VERSION\n";
+}
 else
 {
     print "$mode\n";
@@ -228,8 +233,11 @@ Usage:
   Optionally you can skip register reuse flag auto insertion.  This allows you to observe
   performance without any reuse or you can use it to set the flags manually in your sass.
 
-
     maxas.pl --insert|-i [--noreuse|-n] <asm_file> <cubin_file> [new_cubin_file]
+
+  Display version information and exit:
+
+    maxas.pl --version|-v
 
 EOF
     exit(1);
