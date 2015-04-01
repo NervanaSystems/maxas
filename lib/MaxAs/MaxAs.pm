@@ -987,8 +987,9 @@ sub Scheduler
             my $prev = $schedule[$#schedule];
 
             # if stall is greater than 4 then also yield
+            # the yield flag is required to get stall counts 12-15 working correctly.
             $prev->{ctrl} &= $stall > 4 ? 0x1ffe0 : 0x1fff0;
-            $prev->{ctrl} |= $stall > 11 ? 15 : $stall;
+            $prev->{ctrl} |= $stall;
             $clock += $stall;
         }
         # For stalls bigger than 15 we assume the user is managing it with a barrier
