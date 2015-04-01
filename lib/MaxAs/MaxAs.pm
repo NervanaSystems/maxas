@@ -7,7 +7,7 @@ use Data::Dumper;
 use MaxAs::MaxAsGrammar;
 use Carp;
 
-our $VERSION = '1.01';
+our $VERSION = '1.02';
 
 # these ops need to be converted from absolute addresses to relative in the sass output by cuobjdump
 my %relOffset  = map { $_ => 1 } qw(BRA SSY CAL PBK PCNT);
