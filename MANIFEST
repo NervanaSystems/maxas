@@ -8,7 +8,6 @@ Makefile.PL
 MANIFEST
 microbench/microbench.cpp
 microbench/microbench.cu
-microbench/microbench.cubin
 microbench/microbench.sass
 microbench/shared.pl
 microbench/shared_lds.sass
