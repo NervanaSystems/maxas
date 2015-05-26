@@ -17,8 +17,12 @@ if ($mode =~ /^\-?\-l/i)
 
     my $cubin = MaxAs::Cubin->new($cubinFile);
 
+    my $arch    = $cubin->arch;
+    my $class   = $cubin->class;
     my $kernels = $cubin->listKernels;
     my $symbols = $cubin->listSymbols;
+
+    printf "%s: sm_%d %dbit\n", $cubinFile, $arch, $class;
 
     foreach my $ker (sort keys %$kernels)
     {

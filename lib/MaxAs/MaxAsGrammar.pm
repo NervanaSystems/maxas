@@ -247,14 +247,13 @@ my $memCache = qr"(?<E>\.E)?(?<U>\.U)?(?:\.(?<cache>CG|CI|CS|CV|IL|WT))?";
 # Some of these values are guesses and need to be updated from micro benchmarks.
 # We may need to split these classes up further.
 my $s2rT  = {class => 's2r',   lat => 2,   blat => 25,  rlat => 0, rhold => 0,  tput => 1,   dual => 0, reuse => 0};
-my $smemT = {class => 'mem',   lat => 2,   blat => 50,  rlat => 2, rhold => 20, tput => 1,   dual => 1, reuse => 0};
+my $smemT = {class => 'mem',   lat => 2,   blat => 30,  rlat => 2, rhold => 20, tput => 1,   dual => 1, reuse => 0};
 my $gmemT = {class => 'mem',   lat => 2,   blat => 200, rlat => 4, rhold => 20, tput => 1,   dual => 1, reuse => 0};
-my $shflT = {class => 'shfl',  lat => 2,   blat => 50,  rlat => 0, rhold => 20, tput => 13,  dual => 1, reuse => 0};
 my $x32T  = {class => 'x32',   lat => 6,   blat => 0,   rlat => 0, rhold => 0,  tput => 1,   dual => 0, reuse => 1};
 my $x64T  = {class => 'x64',   lat => 2,   blat => 128, rlat => 0, rhold => 0,  tput => 128, dual => 0, reuse => 1};
 my $shftT = {class => 'shift', lat => 6,   blat => 0,   rlat => 0, rhold => 0,  tput => 2,   dual => 0, reuse => 1};
 my $cmpT  = {class => 'cmp',   lat => 13,  blat => 0,   rlat => 0, rhold => 0,  tput => 2,   dual => 0, reuse => 1};
-my $qtrT  = {class => 'qtr',   lat => 8,   blat => 0,   rlat => 0, rhold => 0,  tput => 4,   dual => 1, reuse => 0};
+my $qtrT  = {class => 'qtr',   lat => 8,   blat => 0,   rlat => 4, rhold => 0,  tput => 1,   dual => 1, reuse => 0};
 my $rroT  = {class => 'rro',   lat => 2,   blat => 0,   rlat => 0, rhold => 0,  tput => 1,   dual => 0, reuse => 0};
 
 # Create map of op names to rules
@@ -269,10 +268,10 @@ our %grammar =
                   { type => $x32T,  code => 0x5980000000000000, rule => qr"^$pred?FFMA$ftz$rnd$sat $r0, $r8, $fcr20, $r39;"o,         },
                   { type => $x32T,  code => 0x5980000000000000, rule => qr"^$pred?FFMA$ftz$rnd$sat $r0, $r8, $r39s20, $c20s39;"o,     },
                 ],
-    FMNMX    => [ { type => $cmpT,  code => 0x5c60000000000000, rule => qr"^$pred?FMNMX$ftz $r0, $r8, $fcr20, $p39;"o,                } ],
+    FMNMX    => [ { type => $shftT, code => 0x5c60000000000000, rule => qr"^$pred?FMNMX$ftz $r0, $r8, $fcr20, $p39;"o,                } ],
     FMUL     => [ { type => $x32T,  code => 0x5c68000000000000, rule => qr"^$pred?FMUL$ftz$rnd$sat $r0, $r8, $fcr20;"o,               } ],
     FMUL32I  => [ { type => $x32T,  code => 0x1e00000000000000, rule => qr"^$pred?FMUL32I$ftz $r0, $r8, $f20w32;"o,                   } ],
-    FSET     => [ { type => $cmpT,  code => 0x5800000000000000, rule => qr"^$pred?FSET$fcmp$ftz$bool $r0, $r8, $fcr20, $p39;"o,       } ],
+    FSET     => [ { type => $shftT, code => 0x5800000000000000, rule => qr"^$pred?FSET$fcmp$ftz$bool $r0, $r8, $fcr20, $p39;"o,       } ],
     FSETP    => [ { type => $cmpT,  code => 0x5bb0000000000000, rule => qr"^$pred?FSETP$fcmp$ftz$bool $p3, $p0, $r8, $fcr20, $p39;"o, } ],
     MUFU     => [ { type => $qtrT,  code => 0x5080000000000000, rule => qr"^$pred?MUFU$func $r0, $r8;"o,                              } ],
     RRO      => [ { type => $rroT,  code => 0x5c90000000000000, rule => qr"^$pred?RRO$rro $r0, $r20;"o,                               } ],
@@ -341,7 +340,7 @@ our %grammar =
     MOV32I => [ { type => $x32T,  code => 0x010000000000f000, rule => qr"^$pred?MOV32I $r0, (?:$i20w32|$f20w32);"o,   } ],
     PRMT   => [ { type => $x32T,  code => 0x5bc0000000000000, rule => qr"^$pred?PRMT$prmt $r0, $r8, $icr20, $cr39;"o, } ],
     SEL    => [ { type => $x32T,  code => 0x5ca0000000000000, rule => qr"^$pred?SEL $r0, $r8, $icr20, $p39;"o,        } ],
-    SHFL   => [ { type => $shflT, code => 0xef10000000000000, rule => qr"^$pred?SHFL$shfl $p48, $r0, $r8, (?:$i20w8|$r20), (?:$i34w13|$r39);"o, } ],
+    SHFL   => [ { type => $smemT, code => 0xef10000000000000, rule => qr"^$pred?SHFL$shfl $p48, $r0, $r8, (?:$i20w8|$r20), (?:$i34w13|$r39);"o, } ],
 
     #Predicate/CC Instructions
     PSET   => [ { type => $cmpT,  code => 0x5088000000000000, rule => qr"^$pred?PSET$bool2$bool $r0, $p12, $p29, $p39;"o,       } ],
@@ -1359,6 +1358,7 @@ sub getAddrVecRegisters
         {
             return map "R$_", ($1 .. $1+1);
         }
+        print Dumper($vectors) unless exists $vectors->{$regName};
         confess "$regName not a 64bit vector register" unless exists $vectors->{$regName};
         return @{$vectors->{$regName}}[0,1];
     }

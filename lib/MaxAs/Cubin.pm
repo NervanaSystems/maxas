@@ -153,6 +153,12 @@ sub new
         seek $fh, 0, 0;
         read $fh, $data, 0x46;
         @{$elfHdr}{@{$elfHdrC[$class]}} = unpack $elfHdrT[$class], $data;
+
+        $cubin->{Class} = 64;
+    }
+    else
+    {
+        $cubin->{Class} = 32;
     }
 
     # verify sm_50 cubin
@@ -313,6 +319,10 @@ sub new
         }
     }
     return $cubin;
+}
+sub class
+{
+    return shift()->{Class};
 }
 sub arch
 {

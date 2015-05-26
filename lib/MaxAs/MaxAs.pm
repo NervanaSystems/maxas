@@ -1178,7 +1178,7 @@ sub setRegisterMap
                 if ($ascending && ($numList[$n] & 1) == 0)
                 {
                     # constrain potential range to vector alignment
-                    my $end = $n + ($numList[$n] & 3 || $n == $#nameList-1 ? 1 : 3);
+                    my $end = $n + ($numList[$n] & 2 || $n + 3 > $#nameList ? 1 : 3);
                     if ($end <= $#nameList)
                     {
                         $vectors->{$nameList[$n]} = [ @nameList[$n .. $end] ];
@@ -1194,7 +1194,7 @@ sub setRegisterMap
             }
         }
     }
-    #print Dumper($regMap); exit(1);
+    #print Dumper($vectors); exit(1);
 }
 
 sub preProcessLine
