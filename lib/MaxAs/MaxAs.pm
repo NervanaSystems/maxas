@@ -7,7 +7,7 @@ use Data::Dumper;
 use MaxAs::MaxAsGrammar;
 use Carp;
 
-our $VERSION = '1.02';
+our $VERSION = '1.03';
 
 # these ops need to be converted from absolute addresses to relative in the sass output by cuobjdump
 my %relOffset  = map { $_ => 1 } qw(BRA SSY CAL PBK PCNT);
@@ -1037,7 +1037,7 @@ sub Scheduler
             }
             # dual issue with a simple instruction (tput <= 2)
             # can't dual issue two instructions that both load a constant
-            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} <= 2 && 
+            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} <= 2 &&
                    $stall == 1 && $ready->{exeTime} <= $clock && !($ready->{const} && $instruct->{const}))
             {
                 $stall = 0;
@@ -1246,7 +1246,7 @@ sub updateDepCounts
     {
         foreach my $child (@$children)
         {
-            next if $edges->{"$node->{lineNum}^$child->[0]{lineNum}"}++; 
+            next if $edges->{"$node->{lineNum}^$child->[0]{lineNum}"}++;
             updateDepCounts($child->[0], $edges);
         }
     }
@@ -1309,7 +1309,7 @@ __END__
 
 =head1 NAME
 
-MaxAs::MaxAs - Assembler for NVIDIA Maxwell architecture 
+MaxAs::MaxAs - Assembler for NVIDIA Maxwell architecture
 
 =head1 SYNOPSIS
 
