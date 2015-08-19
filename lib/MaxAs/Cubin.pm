@@ -277,7 +277,7 @@ sub new
             if ($paramSec)
             {
                 # Extract raw param data
-                my @data = unpack "L*", pack "H*", $paramSec->{Data}; #map { sprintf '0x%08x', $_ }
+                my @data = unpack "L*", pack "H*", $paramSec->{Data}; # map { sprintf '0x%08x', $_ } 
                 #print Dumper(\@data);
                 #exit();
 
@@ -287,7 +287,7 @@ sub new
                 # TODO: this logic is sometimes wrong.. but it turns out you don't need to modify this value to edit a kernel
                 # The correct logic should be looking for the 0x00041c04 or 0x000c1c04 sentinal value near the end of the params
                 # Then pull the following value.  Still not sure how that value exactly relates to the kernel size.
-                $kernelSec->{InsCnt}   = $data[$#data-2] / 8; # the value is stored as a size
+                $kernelSec->{InsCnt}   = $data[$#data] / 8; # the value is stored as a size
 
                 # Find the first param delimiter
                 my $idx = 0;

@@ -113,6 +113,29 @@ elsif ($mode =~ /^\-?\-e/i)
     close $out if $asmFile;
     close $in;
 }
+# Extract a kernel from a sass dump
+elsif ($mode =~ /^\-?\-s/i)
+{
+    my $sassFile  = shift or usage();
+    my $asmFile   = shift;
+
+    open my $in, $sassFile or die "$sassFile: $!";
+
+    my $out;
+    if ($asmFile)
+    {
+        open $out, ">$asmFile" or die "$asmFile: $!";
+    }
+    else
+    {
+        $out = \*STDOUT;
+    }
+
+    MaxAs::MaxAs::Extract($in, $out, []);
+
+    close $out if $asmFile;
+    close $in;
+}
 # Insert the kernel asm back into the cubin:
 elsif ($mode =~ /^\-?\-i/i)
 {

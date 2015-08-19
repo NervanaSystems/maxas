@@ -26,7 +26,13 @@ sub getI
     if ($val  =~ m'^(\d+)[xX]<([^>]+)>')
     {
         # allow any perl expression and multiply result by leading decimal.
-        $val = $1 * eval $2;
+        # also allow global scalar varibles in the expression.
+        my $mul = $1;
+        my $exp = $2;
+        my @globals = $exp =~ m'\$\w+'g;
+        my $our = @globals ? ' our (' . join(',',@globals) . ');' : '';
+        $val = $mul * eval "package MaxAs::MaxAs::CODE;$our $exp";
+        #print "$val = $mul x $exp\n" if $our;
     }
     # hexidecial value
     elsif ($val  =~ m'^0x[0-9a-zA-Z]+')
@@ -255,6 +261,8 @@ my $shftT = {class => 'shift', lat => 6,   blat => 0,   rlat => 0, rhold => 0,  
 my $cmpT  = {class => 'cmp',   lat => 13,  blat => 0,   rlat => 0, rhold => 0,  tput => 2,   dual => 0, reuse => 1};
 my $qtrT  = {class => 'qtr',   lat => 8,   blat => 0,   rlat => 4, rhold => 0,  tput => 1,   dual => 1, reuse => 0};
 my $rroT  = {class => 'rro',   lat => 2,   blat => 0,   rlat => 0, rhold => 0,  tput => 1,   dual => 0, reuse => 0};
+my $voteT = {class => 'vote',  lat => 2,   blat => 0,   rlat => 0, rhold => 0,  tput => 1,   dual => 0, reuse => 0};
+
 
 # Create map of op names to rules
 our %grammar =
@@ -414,7 +422,7 @@ our %grammar =
     BAR    => [ { type => $gmemT, code => 0xf0a8000000000000, rule => qr"^$pred?BAR$bar;"o,                                 } ],
     DEPBAR => [ { type => $x32T,  code => 0xf0f0000000000000, rule => qr"^$pred?DEPBAR$dbar;"o,                             } ],
     MEMBAR => [ { type => $x32T,  code => 0xef98000000000000, rule => qr"^$pred?MEMBAR$mbar;"o,                             } ],
-    VOTE   => [ { type => $x32T,  code => 0x50d8000000000000, rule => qr"^$pred?VOTE$vote (?:$r0, |(?<nor0>))$p45, $p39;"o, } ],
+    VOTE   => [ { type => $voteT, code => 0x50d8000000000000, rule => qr"^$pred?VOTE$vote (?:$r0, |(?<nor0>))$p45, $p39;"o, } ],
     R2B    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?R2B[^;]*;"o,                                } ], #TODO
 
     #Video Instructions... Need to finish
@@ -545,13 +553,12 @@ XMAD: mode
 0x000c000000000000 CSFU
 
 XMAD: modec
-0x0100000000000000 MRG
-0x0000001000000000 PSL
-0x0008000000000000 CHI
 0x0004000000000000 CLO
+0x0008000000000000 CHI
 0x000c000000000000 CSFU
-
-
+0x0040000000000000 X
+0x0080000000000000 PSL
+0x0100000000000000 MRG
 
 XMAD
 0x0010000000000000 CBCC
@@ -1264,6 +1271,15 @@ sub replaceXMADs
         sprintf '
 %1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;%8$s
 %1$s%2$s%3$sXMAD.PSL %4$s, %5$s.H1, %6$s, %4$s;',
+            @+{qw(ctrl space pred d a b c comment)}
+    /egmos;
+
+    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO2C\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<c>\w+)\s*;$CommRe/
+
+        die "XMAD.LO2C: Destination and first operand cannot be the same register ($+{d})." if $+{d} eq $+{a};
+        sprintf '
+%1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;%8$s
+%1$s%2$s%3$sXMAD.PSL %4$s, %5$s, %6$s.H1, %4$s;',
             @+{qw(ctrl space pred d a b c comment)}
     /egmos;
 
