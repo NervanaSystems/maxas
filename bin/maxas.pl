@@ -3,6 +3,7 @@ use strict;
 use MaxAs::Cubin;
 use MaxAs::MaxAs;
 use Data::Dumper;
+use File::Spec;
 
 require 5.10.0;
 
@@ -139,6 +140,11 @@ elsif ($mode =~ /^\-?\-s/i)
 # Insert the kernel asm back into the cubin:
 elsif ($mode =~ /^\-?\-i/i)
 {
+    my $nowarn;
+    if ($ARGV[0] =~ /^\-?\-w/i)
+    {
+        $nowarn = shift;
+    }
     my $kernelName;
     if ($ARGV[0] =~ /^\-?\-k/i)
     {
@@ -167,11 +173,14 @@ elsif ($mode =~ /^\-?\-i/i)
     }
     else { die "$asmFile: $!" }
 
+    my ($vol,$dir) = File::Spec->splitpath($asmFile);
+    my $include = [$vol, $dir];
+
     # extract the kernel name from the file
     ($kernelName) = $file =~ /^# Kernel: (\w+)/ unless $kernelName;
     die "asm file missing kernel name or is badly formatted" unless $kernelName;
 
-    my $kernel = MaxAs::MaxAs::Assemble($file, !$noReuse);
+    my $kernel = MaxAs::MaxAs::Assemble($file, $include, !$noReuse, $nowarn);
 
     my $cubin  = MaxAs::Cubin->new($cubinFile);
     $kernel->{Kernel} = $cubin->getKernel($kernelName) or die "cubin does not contain kernel: $kernelName";
@@ -205,6 +214,9 @@ elsif ($mode =~ /^\-?\-p/i)
     my $file = <$fh>;
     close $fh;
 
+    my ($vol,$dir) = File::Spec->splitpath($asmFile);
+    my $include = [$vol, $dir];
+
     if ($asmFile2)
     {
         open $fh, ">$asmFile2" or die "$asmFile2: $!";
@@ -213,7 +225,7 @@ elsif ($mode =~ /^\-?\-p/i)
     {
         $fh = \*STDOUT;
     }
-    print $fh MaxAs::MaxAs::Preprocess($file, $debug);
+    print $fh MaxAs::MaxAs::Preprocess($file, $include, $debug);
     close $fh;
 }
 # get version information

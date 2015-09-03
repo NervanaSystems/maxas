@@ -5,9 +5,10 @@ require 5.10.0;
 use strict;
 use Data::Dumper;
 use MaxAs::MaxAsGrammar;
+use File::Spec;
 use Carp;
 
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 # these ops need to be converted from absolute addresses to relative in the sass output by cuobjdump
 my %relOffset  = map { $_ => 1 } qw(BRA SSY CAL PBK PCNT);
@@ -26,10 +27,10 @@ my %reuseSlots = (r8 => 1, r20 => 2, r39 => 4);
 # Preprocess and Assemble a source file
 sub Assemble
 {
-    my ($file, $doReuse) = @_;
+    my ($file, $include, $doReuse, $nowarn) = @_;
 
     my $regMap = {};
-    $file = Preprocess($file, 0, $regMap);
+    $file = Preprocess($file, $include, 0, $regMap);
     my $vectors = delete $regMap->{__vectors};
     my $regBank = delete $regMap->{__regbank};
 
@@ -246,7 +247,7 @@ sub Assemble
                 }
                 else
                 {
-                    warn "register used without initialization ($r): $inst\n";
+                    warn "register used without initialization ($r): $inst\n" unless $nowarn;
                     push @{$liveTime{$liveR}}, [$i,$i];
                 }
 
@@ -327,7 +328,7 @@ sub Assemble
                     }
                     else
                     {
-                        warn "register used without initialization ($r0): $inst\n";
+                        warn "register used without initialization ($r0): $inst\n" unless $nowarn;
                         push @{$liveTime{$liveR}}, [$i,$i];
                     }
                 }
@@ -484,7 +485,7 @@ sub Assemble
             if ($instructs[$i]{caps})
             {
                 # calculate stats on registers
-                registerHealth(\%reuseHistory, $instructs[$i]{ctrl}{reuse}[($i & 3) - 1], $instructs[$i]{caps}, $i * 8, "$instructs[$i]{inst} ($instructs[$i]{orig})");
+                registerHealth(\%reuseHistory, $instructs[$i]{ctrl}{reuse}[($i & 3) - 1], $instructs[$i]{caps}, $i * 8, "$instructs[$i]{inst} ($instructs[$i]{orig})", $nowarn);
             }
         }
         # control code
@@ -722,9 +723,14 @@ my $ScheduleRe = qr'^[\t ]*<SCHEDULE_BLOCK>(.*?)^\s*</SCHEDULE_BLOCK>\n?'ms;
 
 sub IncludeFile
 {
-    my $file = shift;
+    my ($file, $include) = @_;
+    my ($vol,$dir,$name) = File::Spec->splitpath($file);
     local $/;
-    open my $fh, $file or die "Could not open file for INCLUDE: $file ($!)\n";
+    my $fh;
+    if (!open $fh, $file)
+    {
+        open $fh, File::Spec->catpath(@$include, $name) or die "Could not open file for INCLUDE: $file ($!)\n";
+    }
     my $content = <$fh>;
     close $fh;
     return $content;
@@ -732,7 +738,7 @@ sub IncludeFile
 
 sub Preprocess
 {
-    my ($file, $debug, $regMap) = @_;
+    my ($file, $include, $debug, $regMap) = @_;
 
     my $constMap = {};
     my $removeRegMap;
@@ -742,7 +748,7 @@ sub Preprocess
         { $regMap = {}; }
 
     # include nested files
-    1 while $file =~ s|$IncludeRe| IncludeFile($1) |eg;
+    1 while $file =~ s|$IncludeRe| IncludeFile($1, $include) |eg;
 
     # Strip out comments
     $file =~ s|$CommentRe||g;
@@ -1256,7 +1262,7 @@ sub updateDepCounts
 # Detect register bank conflicts and calculate reuse stats
 sub registerHealth
 {
-    my ($reuseHistory, $reuseFlags, $capData, $instAddr, $inst) = @_;
+    my ($reuseHistory, $reuseFlags, $capData, $instAddr, $inst, $nowarn) = @_;
 
     my (@banks, @conflicts);
 
@@ -1296,7 +1302,7 @@ sub registerHealth
         else
             { delete $slotHist->{$r};  }
     }
-    if ($inst && @conflicts)
+    if ($inst && @conflicts && !$nowarn)
     {
         printf "CONFLICT at 0x%04x (%s): $inst\n", $instAddr, join(',', @conflicts);
     }
