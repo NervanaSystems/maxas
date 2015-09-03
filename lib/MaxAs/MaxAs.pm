@@ -716,7 +716,7 @@ sub Extract
 
 my $CommentRe  = qr'^[\t ]*<COMMENT>.*?^\s*</COMMENT>\n?'ms;
 my $IncludeRe  = qr'^[\t ]*<INCLUDE\s+file="([^"]+)"\s*/?>\n?'ms;
-my $CodeRe     = qr'^[\t ]*<CODE>(.*?)^\s*<\/CODE>\n?'ms;
+my $CodeRe     = qr'^[\t ]*<CODE(\d*)>(.*?)^\s*<\/CODE\1>\n?'ms;
 my $ConstMapRe = qr'^[\t ]*<CONSTANT_MAPPING>(.*?)^\s*</CONSTANT_MAPPING>\n?'ms;
 my $RegMapRe   = qr'^[\t ]*<REGISTER_MAPPING>(.*?)^\s*</REGISTER_MAPPING>\n?'ms;
 my $ScheduleRe = qr'^[\t ]*<SCHEDULE_BLOCK>(.*?)^\s*</SCHEDULE_BLOCK>\n?'ms;
@@ -754,7 +754,7 @@ sub Preprocess
     $file =~ s|$CommentRe||g;
 
     # Execute the CODE sections
-    $file =~ s|$CodeRe| my $out = eval "package MaxAs::MaxAs::CODE; $1"; $@ ? die("CODE:\n$1\n\nError: $@\n") : $out |eg;
+    1 while $file =~ s|$CodeRe| my $out = eval "package MaxAs::MaxAs::CODE; $2"; $@ ? die("CODE:\n$2\n\nError: $@\n") : $out |eg;
 
     #Pull in the constMap
     $file =~ s/$ConstMapRe/ setConstMap($constMap, $1) /eg;
