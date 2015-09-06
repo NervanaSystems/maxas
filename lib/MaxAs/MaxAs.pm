@@ -8,7 +8,7 @@ use MaxAs::MaxAsGrammar;
 use File::Spec;
 use Carp;
 
-our $VERSION = '1.04';
+our $VERSION = '1.05';
 
 # these ops need to be converted from absolute addresses to relative in the sass output by cuobjdump
 my %relOffset  = map { $_ => 1 } qw(BRA SSY CAL PBK PCNT);
@@ -720,6 +720,7 @@ my $CodeRe     = qr'^[\t ]*<CODE(\d*)>(.*?)^\s*<\/CODE\1>\n?'ms;
 my $ConstMapRe = qr'^[\t ]*<CONSTANT_MAPPING>(.*?)^\s*</CONSTANT_MAPPING>\n?'ms;
 my $RegMapRe   = qr'^[\t ]*<REGISTER_MAPPING>(.*?)^\s*</REGISTER_MAPPING>\n?'ms;
 my $ScheduleRe = qr'^[\t ]*<SCHEDULE_BLOCK>(.*?)^\s*</SCHEDULE_BLOCK>\n?'ms;
+my $InlineRe   = qr'\[(\+|\-)(.+?)\1\]'ms;
 
 sub IncludeFile
 {
@@ -753,8 +754,16 @@ sub Preprocess
     # Strip out comments
     $file =~ s|$CommentRe||g;
 
-    # Execute the CODE sections
-    1 while $file =~ s|$CodeRe| my $out = eval "package MaxAs::MaxAs::CODE; $2"; $@ ? die("CODE:\n$2\n\nError: $@\n") : $out |eg;
+    # Execute the CODE sections (old way to run code, to be deprecated)
+    1 while $file =~ s|$CodeRe|
+        my $out = eval "package MaxAs::MaxAs::CODE; $2";
+        $@ ? die("CODE:\n$2\n\nError: $@\n") : $out |eg;
+
+    # Execute the inline code (new way)
+    $file =~ s|$InlineRe|
+        my ($type, $code) = ($1, $2);
+        my $out = eval "package MaxAs::MaxAs::CODE; $code";
+        $@ ? die("CODE:\n$code\n\nError: $@\n") : $type eq "+" ? $out : "" |eg;
 
     #Pull in the constMap
     $file =~ s/$ConstMapRe/ setConstMap($constMap, $1) /eg;
