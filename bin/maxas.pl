@@ -157,7 +157,7 @@ elsif ($mode =~ /^\-?\-i/i)
         shift;
         my $name  = $1;
         my $value = shift;
-        eval "package MaxAs::MaxAs::CODE; our \$$name = $value;"
+        eval "package MaxAs::MaxAs::CODE; our \$$name = '$value';"
     }
 
     my $asmFile   = shift or usage();
@@ -201,7 +201,7 @@ elsif ($mode =~ /^\-?\-p/i)
         shift;
         my $name  = $1;
         my $value = shift;
-        eval "package MaxAs::MaxAs::CODE; our \$$name = $value;"
+        eval "package MaxAs::MaxAs::CODE; our \$$name = '$value';";
     }
     my $debug     = shift if $ARGV[0] =~ /^\-?\-d/i;
     my $asmFile   = shift or usage();
