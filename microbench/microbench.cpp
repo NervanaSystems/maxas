@@ -1,6 +1,8 @@
 // microbench.cpp : Defines the entry point for the console application.
 //
 
+// nvcc -l cuda -o microbench microbench.cpp
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +37,7 @@ int main(int argc, char* argv[])
 	//	iTest += 0x0800;
 	//}
 	//exit(0);
-	
+
 	char deviceName[32];
 	int devCount, ordinal, major, minor;
 	CUdevice  hDevice;
@@ -146,13 +148,13 @@ int main(int argc, char* argv[])
 
 	// Launch the kernel
 	CUDA_CHECK( cuEventRecord(hStart, NULL) );
-	//CUDA_CHECK( cuProfilerStart() ); 
+	//CUDA_CHECK( cuProfilerStart() );
 	CUDA_CHECK( cuLaunchKernel(hKernel, blocks, 1, 1, threads, 1, 1, 0, 0, params, 0) );
-	//CUDA_CHECK( cuProfilerStop() ); 
+	//CUDA_CHECK( cuProfilerStop() );
 	CUDA_CHECK( cuEventRecord(hStop, NULL) );
 	CUDA_CHECK( cuEventSynchronize(hStop) );
 	CUDA_CHECK( cuEventElapsedTime(&ms, hStart, hStop) );
-	
+
 	//CUDA_CHECK( cuCtxSynchronize() );
 
 	// Get back our results from each kernel
@@ -173,10 +175,10 @@ int main(int argc, char* argv[])
 	if (internalTiming)
 	{
 		int count = 0, total = 0, min = 999999, max = 0;
-		
+
 		int* clocks_p  = clocks;
 		int* dataOut_p = dataOut;
-		
+
 		// Loop over and print results
 		for (int blk = 0; blk < blocks; blk++)
 		{

@@ -1,35 +1,35 @@
 # Kernel: microbench
-# InsCnt: 18
-# RegCnt: 5
-# SharedSize: 4096
-# BarCnt: 1
-# Params(3):
-#   ord:addr:size:align
-#   0:0x140:4:0
-#   1:0x144:4:0
-#   2:0x148:4:0
 
 // This is a simple micro bench to demonstrate the latency in loading SR_TID.X
 
-//blockDim.x c[0x0][0x08]
-//blockDim.y c[0x0][0x0c]
-//blockDim.z c[0x0][0x10]
-//gridDim.x  c[0x0][0x14]
-//gridDim.y  c[0x0][0x18]
-//gridDim.z  c[0x0][0x1c]
+<CONSTANT_MAPPING>
+    blockDimX : c[0x0][0x08]
+    blockDimY : c[0x0][0x0c]
+    blockDimZ : c[0x0][0x10]
+    gridDimX  : c[0x0][0x14]
+    gridDimY  : c[0x0][0x18]
+    gridDimZ  : c[0x0][0x1c]
 
+    param_out[0]    : c[0x0][0x140]
+    param_out[1]    : c[0x0][0x144]
+    param_clocks[0] : c[0x0][0x148]
+    param_clocks[1] : c[0x0][0x14c]
+    param_in[0]     : c[0x0][0x150]
+    param_in[1]     : c[0x0][0x154]
+</CONSTANT_MAPPING>
 
 <REGISTER_MAPPING>
 
-    0-20 : out, clocks, in, tid, bid, blockDim, clock1, clock2, result, x
+     0-1 : out<0-1>
+     2-3 : clocks<0-1>
+     4-5 : in<0-1>
+    6-20 : tid, bid, blockDim, clock1, clock2, result, offset, x
 
 </REGISTER_MAPPING>
 
-// Load in our params
---:-:-:-:1      MOV out,      c[0x0][0x140];
---:-:-:-:1      MOV clocks,   c[0x0][0x144];
---:-:-:-:1      MOV in,       c[0x0][0x148];
---:-:-:-:1      MOV blockDim, c[0x0][0x8];
+// Load in our params (not currently used below)
+--:-:-:-:1      MOV in0, param_in[0];
+--:-:-:-:1      MOV in1, param_in[1];
 
 // Get the first clock value
 --:-:-:-:1      CS2R clock1, SR_CLOCKLO;
@@ -53,17 +53,20 @@
 
 // Setup our output addresses
 // Stall your pipeline dependencies properly
-03:-:-:-:1      XMAD tid, blockDim, bid, tid;
---:-:-:Y:6      XMAD.MRG x, blockDim, bid.H1, RZ;
---:-:-:Y:6      XMAD.PSL.CBCC tid, blockDim.H1, x.H1, tid;
---:-:-:Y:6      SHL  tid, tid, 0x2;
+// Note using a single XMAD assumes blockDimX and bid are 16 bit values, which is reasonable for this test code
+--:-:-:-:6      XMAD offset, bid, blockDimX, tid;
 
---:-:-:-:1      IADD clocks, clocks, tid;
---:-:-:-:1      IADD out,  out,  tid;
+// LEA is "load effective address"
+// The offset param is shifted left 2 and added to the pointers with 64bit math
+--:-:-:-:6      LEA      clocks0.CC, offset, param_clocks[0],     2;
+--:-:-:-:1      LEA.HI.X clocks1,    offset, param_clocks[1], RZ, 2;
+
+--:-:-:-:6      LEA      out0.CC, offset, param_out[0],     2;
+--:-:-:-:1      LEA.HI.X out1,    offset, param_out[1], RZ, 2;
 
 // Output the results.
 // No stall needed on prior instruction as memory store instructions have a 5 clock delay in picking up register values
---:-:-:-:1      STG [clocks], clock1;
---:-:-:-:1      STG [out],    tid;
+--:-:-:-:1      STG.E [clocks], clock1;
+--:-:-:-:1      STG.E [out],    offset; # use this to return whatever you like to inspect the results
 --:-:-:-:5      EXIT;
 

@@ -4,9 +4,18 @@
 #include <device_functions.h>
 #include <device_launch_parameters.h>
 
-// nvcc -arch sm_50 -m 32 -cubin microbench.cu
-// maxas.pl -e microbench.cubin microbench_new.sass
-// maxas.pl -i microbench_new.sass microbench.cubin
+// Build:
+// nvcc -l cuda -o microbench microbench.cpp
+// nvcc -arch sm_50 -cubin microbench.cu
+
+// Inspect a cubin (use nvdisasm from cuda 6.5 for best results):
+// maxas.pl -e microbench.cubin
+
+// Insert new sass into cubin
+// maxas.pl -i microbench.sass microbench.cubin
+
+// run it:
+// ./microbench
 
 // Use extern C so C++ doesn't mangle our kernel name
 extern "C" __global__ void  microbench(int *out, int *clocks, int *in)
@@ -16,13 +25,6 @@ extern "C" __global__ void  microbench(int *out, int *clocks, int *in)
     int tid = threadIdx.x;
     int bx  = blockIdx.x;
     int by  = blockIdx.y;
-    //int blkDimX = blockDim.x;
-    //int blkDimY = blockDim.y;
-    //int blkDimZ = blockDim.z;
-    //int grdDimX = gridDim.x;
-    //int grdDimY = gridDim.y;
-    //int grdDimZ = gridDim.z;
-
 
     int start = clock();
 
@@ -34,7 +36,7 @@ extern "C" __global__ void  microbench(int *out, int *clocks, int *in)
 
     clocks[tid] = (start >> 16) | (end & 0xffff0000); //end - start;
 
-    //out[tid] = share[tid ^ 1];
+    out[tid] = share[tid ^ 1];
 }
 
 // A note about using the Cuda Runtime.
