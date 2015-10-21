@@ -879,7 +879,7 @@ sub Scheduler
             push @src, $instruct->{predReg} if $instruct->{pred};
 
             # Populate our register source and destination lists, skipping any zero or true values
-            foreach my $operand (grep { exists $regops{$_} } keys %$capData)
+            foreach my $operand (grep { exists $regops{$_} } sort keys %$capData)
             {
                 # figure out which list to populate
                 my $list = exists($destReg{$operand}) && !exists($noDest{$instruct->{op}}) ? \@dest : \@src;
@@ -891,11 +891,11 @@ sub Scheduler
                 {
                     # add the value to list with the correct prefix
                     push @$list,
-                        $operand eq 'r0' ? getVecRegisters($vectors, $capData) :
-                        $operand eq 'r8' ? getAddrVecRegisters($vectors, $capData) :
+                        $operand eq 'r0' ? map(getRegNum($regMap, $_), getVecRegisters($vectors, $capData)) :
+                        $operand eq 'r8' ? map(getRegNum($regMap, $_), getAddrVecRegisters($vectors, $capData)) :
                         $operand eq 'CC' ? 'CC' :
                         $operand eq 'X'  ? 'CC' :
-                        $capData->{$operand};
+                        getRegNum($regMap, $capData->{$operand});
                 }
             }
             $instruct->{const} = 1 if exists($capData->{c20}) || exists($capData->{c39});
@@ -1126,9 +1126,10 @@ sub setRegisterMap
         # skip blank lines
         next unless $line =~ m'\S';
 
-        my $auto = $line =~ /~/;
+        my $auto  = $line =~ /~/;
+        my $share = $line =~ /=/;
 
-        my ($regNums, $regNames) = split '\s*[:~]\s*', $line;
+        my ($regNums, $regNames) = split '\s*[:~=]\s*', $line;
 
         my (@numList, @nameList, %vecAliases);
         foreach my $num (split '\s*,\s*', $regNums)
@@ -1166,7 +1167,8 @@ sub setRegisterMap
                 die "Bad register name: '$fullName' at: $line\n";
             }
         }
-        die "Missmatched register mapping at: $line\n" if @numList < @nameList;
+        die "Missmatched register mapping at: $line\n" if !$share && @numList < @nameList;
+        die "Missmatched register mapping at: $line\n" if $share && @numList > 1;
 
         # detect if this list is monotonically ascending with no gaps
         my $i = 0;
@@ -1185,6 +1187,11 @@ sub setRegisterMap
             {
                 # assign possible values to be assigned on assembly
                 $regMap->{$nameList[$n]} = \@numList;
+            }
+            elsif ($share)
+            {
+                # each name shares the same single register
+                $regMap->{$nameList[$n]} = 'R' . $numList[0];
             }
             else
             {
@@ -1209,7 +1216,7 @@ sub setRegisterMap
             }
         }
     }
-    #print Dumper($vectors); exit(1);
+    #print Dumper($regMap); exit(1);
 }
 
 sub preProcessLine

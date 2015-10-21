@@ -10,7 +10,7 @@ our @EXPORT = qw(
     %grammar %flags
     parseInstruct genCode genReuseCode
     processAsmLine processSassLine processSassCtrlLine
-    replaceXMADs printCtrl readCtrl getVecRegisters getAddrVecRegisters
+    replaceXMADs printCtrl readCtrl getRegNum getVecRegisters getAddrVecRegisters
 );
 
 require 5.10.0;
@@ -1265,22 +1265,22 @@ sub replaceXMADs
                 @+{qw(ctrl space pred d a b c x comment)}
     /egmos;
 
-    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO2\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>-?$immed|\w+)\s*,\s*(?<c>c\[$hex\]\[$hex\]|\w+)\s*;$CommRe/
+    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD(?<mod>(?:\.[SU]16)(?:\.[SU]16))?\.LO2\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>-?$immed|\w+)\s*,\s*(?<c>c\[$hex\]\[$hex\]|\w+)\s*;$CommRe/
 
         die "XMAD.LO2: Destination and first operand cannot be the same register ($+{d})." if $+{d} eq $+{a};
         sprintf '
-%1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;%8$s
-%1$s%2$s%3$sXMAD.PSL %4$s, %5$s.H1, %6$s, %4$s;',
-            @+{qw(ctrl space pred d a b c comment)}
+%1$s%2$s%3$sXMAD%9$s %4$s, %5$s, %6$s, %7$s;%8$s
+%1$s%2$s%3$sXMAD%9$s.PSL %4$s, %5$s.H1, %6$s, %4$s;',
+            @+{qw(ctrl space pred d a b c comment mod)}
     /egmos;
 
-    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO2C\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<c>\w+)\s*;$CommRe/
+    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD(?<mod>(?:\.[SU]16)(?:\.[SU]16))?\.LO2C\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<c>\w+)\s*;$CommRe/
 
         die "XMAD.LO2C: Destination and first operand cannot be the same register ($+{d})." if $+{d} eq $+{a};
         sprintf '
-%1$s%2$s%3$sXMAD %4$s, %5$s, %6$s, %7$s;%8$s
-%1$s%2$s%3$sXMAD.PSL %4$s, %5$s, %6$s.H1, %4$s;',
-            @+{qw(ctrl space pred d a b c comment)}
+%1$s%2$s%3$sXMAD%9$s %4$s, %5$s, %6$s, %7$s;%8$s
+%1$s%2$s%3$sXMAD%9$s.PSL %4$s, %5$s, %6$s.H1, %4$s;',
+            @+{qw(ctrl space pred d a b c comment mod)}
     /egmos;
 
     #TODO: add more XMAD macros
@@ -1335,10 +1335,18 @@ sub readCtrl
         $stall << 0;
 }
 
+sub getRegNum
+{
+    my ($regMap, $regName) = @_;
+
+    return !exists($regMap->{$regName}) || ref($regMap->{$regName}) ? $regName : $regMap->{$regName};
+}
+
 sub getVecRegisters
 {
     my ($vectors, $capData) = @_;
     my $regName = $capData->{r0} or return;
+
     return if $regName eq 'RZ';
 
     if ($capData->{type} eq '.64' || $capData->{i31w4} eq '0x3')
@@ -1366,6 +1374,7 @@ sub getAddrVecRegisters
 {
     my ($vectors, $capData) = @_;
     my $regName = $capData->{r8} or return;
+
     return if $regName eq 'RZ';
 
     if (exists $capData->{E})
