@@ -314,7 +314,7 @@ our %grammar =
                    { type => $shftT,  code => 0x5bdf004000000000, rule => qr"^$pred?LEA\.HI$X $r0cc, $r8, $r20, $r39, $i28w8;"o,          },
                    { type => $shftT,  code => 0x0a07000000000000, rule => qr"^$pred?LEA\.HI$X $r0cc, $r8, $c20, $r39, $i51w5;"o,          },
                  ],
-    LOP       => [ { type => $x32T,   code => 0x5c40000000000000, rule => qr"^$pred?LOP$bool$lopz $r0, $r8, (?<not>~)?$icr20;"o,          } ],
+    LOP       => [ { type => $x32T,   code => 0x5c40000000000000, rule => qr"^$pred?LOP$bool$lopz $r0, $r8, (?<INV>~)?$icr20(?<INV>\.INV)?;"o, } ],
     LOP32I    => [ { type => $x32T,   code => 0x0400000000000000, rule => qr"^$pred?LOP32I$bool $r0, $r8, $i20w32;"o,                     } ],
     LOP3      => [
                    { type => $x32T,   code => 0x5be7000000000000, rule => qr"^$pred?LOP3\.LUT $r0, $r8, $r20, $r39, $i28w8;"o,            },
@@ -518,7 +518,7 @@ LOP: bool
 0x0000060000000000 PASS_B
 
 LOP:
-0x0000010000000000 not
+0x0000010000000000 INV
 
 LOP: z
 0x0000200000000000 Z
