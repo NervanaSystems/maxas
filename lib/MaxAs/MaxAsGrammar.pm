@@ -29,10 +29,12 @@ sub getI
         # also allow global scalar varibles in the expression.
         my $mul = $1;
         my $exp = $2;
+        # strip leading zeros (don't interpret numbers as octal)
+        $exp =~ s/(?<!\d)0+(?=[1-9])//g;
         my @globals = $exp =~ m'\$\w+'g;
         my $our = @globals ? ' our (' . join(',',@globals) . ');' : '';
         $val = $mul * eval "package MaxAs::MaxAs::CODE;$our $exp";
-        #print "$val = $mul x $exp\n" if $our;
+        #print "$val = $mul x $exp\n"; # if $our;
     }
     # hexidecial value
     elsif ($val  =~ m'^0x[0-9a-zA-Z]+')
