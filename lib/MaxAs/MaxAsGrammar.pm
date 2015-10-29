@@ -214,7 +214,7 @@ my $rro   = qr"\.(?<func>SINCOS|EX2)";
 my $add3  = qr"(?:\.(?<type>X|RS|LS))?";
 my $lopz  = qr"(?:\.(?<z>NZ|Z) $p48,|(?<noz>))"o;
 my $X     = qr"(?<X>\.X)?";
-my $tld   = qr"(?<reuse1>T)|(?<reuse2>P)";
+my $tld   = qr"(?<NODEP>NODEP\.)?(?:(?<reuse1>T)|(?<reuse2>P))";
 my $chnls = qr"(?<chnls>R|RGBA)";
 my $sr    = qr"SR_(?<sr>\S+)";
 my $shf   = qr"(?<W>\.W)?(?:\.(?<type>U64|S64))?(?<HI>\.HI)?";
@@ -925,6 +925,9 @@ BRA
 
 TLDS: chnls
 0x0010000000000000 RGBA
+
+TLDS
+0x0002000000000000 NODEP
 
 LD, ST, LDG, STG, LDS, STS, LDL, STL, LDC, RED, ATOM, ATOMS
 0x000000000000ff00 nor8
