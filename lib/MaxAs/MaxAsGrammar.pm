@@ -132,6 +132,8 @@ my %operands =
     d20     => sub { getF($_[0], 20, 'd', 44)    },
     i8w4    => sub { getI($_[0], 8,  0xf)        },
     i20     => sub { getI($_[0], 20, 0x7ffff)    },
+    i20w6   => sub { getI($_[0], 20, 0x3f)       },
+    i20w7   => sub { getI($_[0], 20, 0x7f)       },
     i20w8   => sub { getI($_[0], 20, 0xff)       },
     i20w12  => sub { getI($_[0], 20, 0xfff)      },
     i20w24  => sub { getI($_[0], 20, 0xffffff)   },
@@ -165,8 +167,8 @@ my $p48     = qr"(?<p48>$p)"o;
 my $p58     = qr"(?<p58>$p)"o;
 my $r0      = qr"(?<r0>$reg)";
 my $r0cc    = qr"(?<r0>$reg)(?<CC>\.CC)?";
-my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1|B0|B1|B2|B3))?(?<reuse1>\.reuse)?";
-my $r20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r20>$reg)\|?(?:\.(?<r20part>H0|H1|B0|B1|B2|B3))?(?<reuse2>\.reuse)?";
+my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1|B0|B1|B2|B3|H0_H0|H1_H1))?(?<reuse1>\.reuse)?";
+my $r20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r20>$reg)\|?(?:\.(?<r20part>H0|H1|B0|B1|B2|B3|H0_H0|H1_H1))?(?<reuse2>\.reuse)?";
 my $r28     = qr"(?<r28>$reg)";
 my $r39s20  = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r39s20>(?<r20>$reg))\|?(?:\.(?<r39part>H0|H1))?(?<reuse2>\.reuse)?";
 my $r39     = qr"(?<r39neg>\-)?(?<r39>$reg)(?:\.(?<r39part>H0|H1))?(?<reuse3>\.reuse)?";
@@ -179,6 +181,8 @@ my $f20     = qr"(?<f20>(?:(?<neg>\-)|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)
 my $d20     = qr"(?<d20>(?:(?<neg>\-)|\+|)(?i:inf\s*|\d+(?:\.\d+(?:e[\+\-]\d+)?)?))(?<r20neg>\.NEG)?"o;
 my $i8w4    = qr"(?<i8w4>$immed)"o;
 my $i20     = qr"(?<i20>(?<neg>\-)?$immed)(?<r20neg>\.NEG)?"o;
+my $i20w6   = qr"(?<i20w6>$immed)"o;
+my $i20w7   = qr"(?<i20w7>$immed)"o;
 my $i20w8   = qr"(?<i20w8>$immed)"o;
 my $i20w12  = qr"(?<i20w12>$immed)"o;
 my $i20w24  = qr"(?<i20w24>\-?$immed)"o;
@@ -231,7 +235,8 @@ my $prmt  = qr"(?:\.(?<mode>F4E|B4E|RC8|ECL|ECR|RC16))?";
 my $shfl  = qr"\.(?<mode>IDX|UP|DOWN|BFLY)";
 my $bar   = qr"\.(?<mode>SYNC|ARV|RED)(?:\.(?<red>POPC|AND|OR))? (?:$i8w4|$r8)(?:, (?:$i20w12|$r20))?(?(<r20>)|(?<nor20>))(?(<red>), $p39|(?<nop39>))"o;
 my $b2r   = qr"\.RESULT $r0(?:, $p45|(?<nop45>))"o;
-my $dbar  = qr" {(?<db5>5)?,?(?<db4>4)?,?(?<db3>3)?,?(?<db2>2)?,?(?<db1>1)?,?(?<db0>0)?}";
+my $dbar  = qr"(?<SB>SB0|SB1|SB2|SB3|SB4|SB5)";
+my $dbar2 = qr" {(?<db5>5)?,?(?<db4>4)?,?(?<db3>3)?,?(?<db2>2)?,?(?<db1>1)?,?(?<db0>0)?}";
 my $mbar  = qr"\.(?<mode>CTA|GL|SYS)";
 my $addr  = qr"\[(?:(?<r8>$reg)|(?<nor8>))(?:\s*\+?\s*$i20w24)?\]"o;
 my $addr2 = qr"\[(?:(?<r8>$reg)|(?<nor8>))(?:\s*\+?\s*$i28w20)?\]"o;
@@ -296,6 +301,7 @@ our %grammar =
     HADD2     => [ { type => $x32T,  code => 0x5d10000000000000, rule => qr"^$pred?HADD2$ftz $r0, $r8, $r20;"o,               } ],
     HMUL2     => [ { type => $x32T,  code => 0x5d08000000000000, rule => qr"^$pred?HMUL2$ftz $r0, $r8, $r20;"o,               } ],
     HFMA2     => [ { type => $x32T,  code => 0x5d00000000000000, rule => qr"^$pred?HFMA2$ftz $r0, $r8, $r20, $r39;"o,         } ],
+    HSETP2    => [ { type => $cmpT,  code => 0x5d20000000000000, rule => qr"^$pred?HSETP2$fcmp$bool $p3, $p0, $r8, $fcr20, $p39;"o, } ], #Partial
 
     #Integer Instructions
     BFE       => [ { type => $shftT,  code => 0x5c01000000000000, rule => qr"^$pred?BFE$u32 $r0, $r8, $icr20;"o,                          } ],
@@ -357,8 +363,8 @@ our %grammar =
     PSETP  => [ { type => $cmpT,  code => 0x5090000000000000, rule => qr"^$pred?PSETP$bool2$bool $p3, $p0, $p12, $p29, $p39;"o, } ],
     CSET   => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSET[^;]*;"o,  } ], #TODO
     CSETP  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSETP[^;]*;"o, } ], #TODO
-    P2R    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?P2R[^;]*;"o,   } ], #TODO
-    R2P    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?R2P[^;]*;"o,   } ], #TODO
+    P2R    => [ { type => $x32T,  code => 0x38e8000000000000, rule => qr"^$pred?P2R $r0, PR, $r8, $i20w7;"o,   } ],
+    R2P    => [ { type => $cmpT,  code => 0x38f0000000000000, rule => qr"^$pred?R2P PR, $r8, $i20w7;"o,   } ],
 
     #Texture Instructions
     # Handle the commonly used 1D texture functions.. but save the others for later
@@ -422,7 +428,10 @@ our %grammar =
     S2R    => [ { type => $s2rT,  code => 0xf0c8000000000000, rule => qr"^$pred?S2R $r0, $sr;"o,                            } ],
     B2R    => [ { type => $x32T,  code => 0xf0b800010000ff00, rule => qr"^$pred?B2R$b2r;"o,                                 } ],
     BAR    => [ { type => $gmemT, code => 0xf0a8000000000000, rule => qr"^$pred?BAR$bar;"o,                                 } ],
-    DEPBAR => [ { type => $x32T,  code => 0xf0f0000000000000, rule => qr"^$pred?DEPBAR$dbar;"o,                             } ],
+    DEPBAR => [
+                { type => $gmemT, code => 0xf0f0000000000000, rule => qr"^$pred?DEPBAR$icmp $dbar, $i20w6;"o, },
+                { type => $gmemT, code => 0xf0f0000000000000, rule => qr"^$pred?DEPBAR$dbar2;"o,              },
+              ],
     MEMBAR => [ { type => $x32T,  code => 0xef98000000000000, rule => qr"^$pred?MEMBAR$mbar;"o,                             } ],
     VOTE   => [ { type => $voteT, code => 0x50d8000000000000, rule => qr"^$pred?VOTE$vote (?:$r0, |(?<nor0>))$p45, $p39;"o, } ],
     R2B    => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?R2B[^;]*;"o,                                } ], #TODO
@@ -707,6 +716,17 @@ IADD32I
 0x0100000000000000 r8neg
 0x0020000000000000 X
 
+DEPBAR: SB
+0x0000000000000000 SB0
+0x0000000004000000 SB1
+0x0000000008000000 SB2
+0x000000000c000000 SB3
+0x0000000010000000 SB4
+0x0000000014000000 SB5
+
+DEPBAR: cmp
+0x0000000020000000 LE
+
 DEPBAR
 0x0000000000000001 db0
 0x0000000000000002 db1
@@ -760,6 +780,14 @@ F2I: round
 0x0000008000000000 FLOOR
 0x0000010000000000 CEIL
 0x0000018000000000 TRUNC
+
+HADD2, HMUL2: r8part
+0x0001000000000000 H0_H0
+0x0000000000000000 H1_H1
+
+HFMA2: r20part
+0x0000000020000000 H0_H0
+0x0000000030000000 H1_H1
 
 FADD, DADD, FMUL, DMUL, F2F, I2F: rnd
 0x0000000000000000 RN
@@ -865,6 +893,12 @@ FSETP, DSETP, FSET, DSET: bool
 0x0000000000000000 AND
 0x0000200000000000 OR
 0x0000400000000000 XOR
+
+HSETP2: cmp
+0x0000002800000000 .NE
+
+HSETP2: bool
+0x0000000000000000 AND
 
 S2R: sr
 0x0000000000000000 LANEID

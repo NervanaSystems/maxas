@@ -699,7 +699,7 @@ sub Extract
                 # replace address with name
                 $inst->{ins} =~ s/(0x[0-9a-f]+)/$label/;
             }
-            $inst->{ins} =~ s/(c\[0x0\]\[0x[0-9a-f]+\])/ $paramMap{$1} || $1 /eg;
+            $inst->{ins} =~ s/(c\[0x0\])\s*(\[0x[0-9a-f]+\])/ $paramMap{$1 . $2} || $1 /eg;
 
             $inst->{ctrl} = printCtrl($ctrl);
 
@@ -877,6 +877,17 @@ sub Scheduler
 
             # A predicate prefix is treated as a source reg
             push @src, $instruct->{predReg} if $instruct->{pred};
+
+            # Handle P2R and R2P specially
+            if ($instruct->{op} =~ m'P2R|R2P' && $capData->{i20w7})
+            {
+                my $list = $instruct->{op} eq 'R2P' ? \@dest : \@src;
+                my $mask = hex($capData->{i20w7});
+                foreach my $p (0..6)
+                {
+                    push @$list, "P$p" if $mask & (1 << $p);
+                }
+            }
 
             # Populate our register source and destination lists, skipping any zero or true values
             foreach my $operand (grep { exists $regops{$_} } sort keys %$capData)
