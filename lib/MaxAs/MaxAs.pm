@@ -885,7 +885,16 @@ sub Scheduler
                 my $mask = hex($capData->{i20w7});
                 foreach my $p (0..6)
                 {
-                    push @$list, "P$p" if $mask & (1 << $p);
+                    if ($mask & (1 << $p))
+                    {
+                        push @$list, "P$p";
+                    }
+                    # make this instruction dependent on any predicates it's not setting
+                    # this is to prevent a race condition for any predicate sets that are pending
+                    elsif ($instruct->{op} eq 'R2P')
+                    {
+                        push @src, "P$p";
+                    }
                 }
             }
 
