@@ -20,10 +20,11 @@ if ($mode =~ /^\-?\-l/i)
 
     my $arch    = $cubin->arch;
     my $class   = $cubin->class;
+    my $asize   = $cubin->address_size;
     my $kernels = $cubin->listKernels;
     my $symbols = $cubin->listSymbols;
 
-    printf "%s: sm_%d %dbit\n", $cubinFile, $arch, $class;
+    printf "%s: arch:sm_%d machine:%dbit address_size:%dbit\n", $cubinFile, $arch, $class, $asize;
 
     foreach my $ker (sort keys %$kernels)
     {

@@ -165,6 +165,8 @@ sub new
     $cubin->{Arch} = $elfHdr->{flags} & 0xFF;
     die "Cubin not in sm_50 or greater format. Found: sm_$cubin->{Arch}\n" if $cubin->{Arch} < 50;
 
+    $cubin->{AddressSize} = $elfHdr->{flags} & 0x400 ? 64 : 32;
+
     # Read in Program Headers
     seek $fh, $elfHdr->{phOffset}, 0;
     foreach (1 .. $elfHdr->{phNum})
@@ -277,24 +279,17 @@ sub new
             if ($paramSec)
             {
                 # Extract raw param data
-                my @data = unpack "L*", pack "H*", $paramSec->{Data}; # map { sprintf '0x%08x', $_ } 
-                #print Dumper(\@data);
-                #exit();
+                my @data = unpack "L*", pack "H*", $paramSec->{Data};
 
                 $paramSec->{ParamData} = \@data;
-
-                # InsCnt is the number of non-control instructions of a kernel (not including final EXIT, BRA and NOP instuctions)
-                # TODO: this logic is sometimes wrong.. but it turns out you don't need to modify this value to edit a kernel
-                # The correct logic should be looking for the 0x00041c04 or 0x000c1c04 sentinal value near the end of the params
-                # Then pull the following value.  Still not sure how that value exactly relates to the kernel size.
-                $kernelSec->{InsCnt}   = $data[$#data] / 8; # the value is stored as a size
+                $paramSec->{ParamHex} = [ map { sprintf '0x%08x', $_ } @data ];
 
                 # Find the first param delimiter
                 my $idx = 0;
                 $idx++ while $idx < @data && $data[$idx] != 0x00080a04;
 
                 my $first = $data[$idx+2] & 0xFFFF;
-                my $size  = $data[$idx+2] >> 16;
+                #my $size  = $data[$idx+2] >> 16;
                 $idx += 4;
 
                 my @params;
@@ -308,9 +303,76 @@ sub new
                     unshift @params, "$ord:$offset:$psize:$align";
                     $idx += 4;
                 }
-                $kernelSec->{Params} = \@params;
+                my @staticParams = @data[0 .. $idx];
+
+                # MAXREG_COUNT
+                $idx++;
+
+                my (@exitOffsets, @ctaidOffsets, $ctaidzUsed, @reqntid, @maxntid);
+                while ($idx < @data)
+                {
+                    my $code = $data[$idx] & 0xffff;
+                    my $size = $data[$idx] >> 16;
+                    $idx++;
+
+                    # EIATTR_S2RCTAID_INSTR_OFFSETS
+                    if ($code == 0x1d04)
+                    {
+                        while ($size > 0)
+                        {
+                            push @ctaidOffsets, $data[$idx++];
+                            $size -= 4;
+                        }
+                    }
+                    # EIATTR_EXIT_INSTR_OFFSETS
+                    elsif ($code == 0x1c04)
+                    {
+                        while ($size > 0)
+                        {
+                            push @exitOffsets, $data[$idx++];
+                            $size -= 4;
+                        }
+                    }
+                    # EIATTR_CTAIDZ_USED
+                    elsif ($code == 0x0401)
+                    {
+                        $ctaidzUsed = 1;
+                    }
+                    # EIATTR_REQNTID
+                    elsif ($code == 0x1004)
+                    {
+                        while ($size > 0)
+                        {
+                            push @reqntid, $data[$idx++];
+                            $size -= 4;
+                        }
+                    }
+                    # EIATTR_MAX_THREADS
+                    elsif ($code == 0x0504)
+                    {
+                        while ($size > 0)
+                        {
+                            push @maxntid, $data[$idx++];
+                            $size -= 4;
+                        }
+                    }
+                    else
+                    {
+                        printf "Unknown Code 0x%02x (size:%d)\n", $code, $size;
+                    }
+                }
+                $kernelSec->{Params}   = \@params;
                 $kernelSec->{ParamCnt} = scalar @params;
+
+                $paramSec->{StaticParams} = \@staticParams;
+                $paramSec->{ExitOffsets}  = \@exitOffsets;
+                $paramSec->{CTAIDOffsets} = \@ctaidOffsets;
+                $paramSec->{CTAIDZUsed}   = $ctaidzUsed;
+                $paramSec->{REQNTID}      = \@reqntid;
+                $paramSec->{MAXNTID}      = \@maxntid;
             }
+            # print Dumper($paramSec);
+            # exit();
         }
         # Note GLOBALs found in this cubin
         elsif (($symEnt->{info} & 0x10) == 0x10)
@@ -318,6 +380,23 @@ sub new
             $cubin->{Symbols}{$symEnt->{Name}} = $symEnt;
         }
     }
+
+    # print "phOffset: $elfHdr->{phOffset}\n";
+    # print "shOffset: $elfHdr->{shOffset}\n";
+    # foreach my $secHdr (@{$cubin->{secHdrs}})
+    # {
+    #     print "secHdr($secHdr->{Indx}): $secHdr->{offset}, $secHdr->{size}, $secHdr->{align} ($secHdr->{Name})\n";
+    # }
+    # my $p = 0;
+    # foreach my $prgHdr (@{$cubin->{prgHdrs}})
+    # {
+    #     print "prgHdr($p): type: $prgHdr->{type}, offset: $prgHdr->{offset}, fileSize: $prgHdr->{fileSize}, memSize: $prgHdr->{memSize}, align: $prgHdr->{align}\n";
+    #     $p++;
+    # }
+    #exit();
+
+    # print Dumper($cubin->{prgHdrs});
+    # exit();
     return $cubin;
 }
 sub class
@@ -327,6 +406,10 @@ sub class
 sub arch
 {
     return shift()->{Arch};
+}
+sub address_size
+{
+    return shift()->{AddressSize};
 }
 sub listKernels
 {
@@ -346,15 +429,14 @@ sub modifyKernel
 {
     my ($cubin, %params) = @_;
 
-    my $kernelSec = $params{Kernel};
-    my $newReg    = $params{RegCnt};
-    my $newBar    = $params{BarCnt};
-    my $newCnt    = $params{InsCnt};
-    my $newData   = $params{KernelData};
-    my $newSize   = @$newData * 8;
-
-    my $elfHdr = $cubin->{elfHdr};
-    my $class  = $elfHdr->{fileClass};
+    my $kernelSec    = $params{Kernel};
+    my $newReg       = $params{RegCnt};
+    my $newBar       = $params{BarCnt};
+    my $exitOffsets  = $params{ExitOffsets};
+    my $ctaidOffsets = $params{CTAIDOffsets};
+    my $ctaidzUsed   = $params{CTAIDZUsed};
+    my $newData      = $params{KernelData};
+    my $newSize      = @$newData * 8;
 
     die "255 register max" if $newReg > 255;
     die "new kernel size must be multiple of 8 instructions (64 bytes)" if $newSize & 63;
@@ -381,55 +463,145 @@ sub modifyKernel
         $kernelSec->{flags} &= ~0x01f00000;
         $kernelSec->{flags} |=  $newBar << 20;
     }
-    # This logic is sometimes wrong but it's not required to modify to get the kernel working
-    #if ($newCnt != $kernelSec->{InsCnt})
-    #{
-    #    print "Modified $kernelName InsCnt: $kernelSec->{InsCnt} => $newCnt\n";
-    #    $kernelSec->{InsCnt} = $newCnt;
-    #    my $data = $paramSec->{ParamData};
-    #    $data->[$#$data-2] = $newCnt * 8;
-    #    $paramSec->{Data} = unpack "H*", pack "L*", @$data;
-    #}
+
+    my @paramData = @{$paramSec->{StaticParams}};
+
+    my $newCTAIDs = join ',', map { sprintf '%04x', $_ } @$ctaidOffsets;
+    my $oldCTAIDs = join ',', map { sprintf '%04x', $_ } @{$paramSec->{CTAIDOffsets}};
+
+    if ($newCTAIDs ne $oldCTAIDs)
+    {
+        print "Modified $kernelName CTAID Offsets: '$oldCTAIDs' => '$newCTAIDs'\n";
+    }
+    if (@$ctaidOffsets)
+    {
+        push @paramData, (scalar(@$ctaidOffsets) << 18) | 0x1d04;
+        push @paramData, @$ctaidOffsets;
+    }
+
+    my $newExits = join ',', map { sprintf '%04x', $_ } @$exitOffsets;
+    my $oldExits = join ',', map { sprintf '%04x', $_ } @{$paramSec->{ExitOffsets}};
+
+    if ($newExits ne $oldExits)
+    {
+        print "Modified $kernelName Exit Offsets: '$oldExits' => '$newExits'\n";
+    }
+    if (@$exitOffsets)
+    {
+        push @paramData, (scalar(@$exitOffsets) << 18) | 0x1c04;
+        push @paramData, @$exitOffsets;
+    }
+
+    if ($ctaidzUsed != $paramSec->{CTAIDZUsed})
+    {
+        print "Modified $kernelName CTAID.Z Used: '$paramSec->{CTAIDZUsed}' => '$ctaidzUsed'\n";
+    }
+    if ($ctaidzUsed)
+    {
+        push @paramData, 0x0401;
+    }
+
+    if (@{$paramSec->{REQNTID}})
+    {
+        push @paramData, (scalar(@{$paramSec->{REQNTID}}) << 18) | 0x1004;
+        push @paramData, @{$paramSec->{REQNTID}};
+    }
+    if (@{$paramSec->{MAXNTID}})
+    {
+        push @paramData, (scalar(@{$paramSec->{MAXNTID}}) << 18) | 0x0504;
+        push @paramData, @{$paramSec->{MAXNTID}};
+    }
+
+    my $newParamSize  = scalar(@paramData)*4;
+    $paramSec->{Data} = unpack "H*", pack "L*", @paramData;
+    if ($newParamSize != $paramSec->{size})
+    {
+        print "Modified $kernelName ParamSecSize: $paramSec->{size} => $newParamSize\n";
+        $cubin->updateSize($paramSec, $newParamSize);
+    }
+
     if ($newSize != $kernelSec->{size})
     {
-        print "Modified $kernelName Size: $kernelSec->{size} => $newSize\n";
+        print "Modified $kernelName KernelSize: $kernelSec->{size} => $newSize\n";
+        $cubin->updateSize($kernelSec, $newSize, 1);
+    }
+}
 
-        # update kernel section
-        my $delta = $newSize - $kernelSec->{size};
-        $kernelSec->{size} = $newSize;
+sub updateSize
+{
+    my ($cubin, $sec, $newSize, $updatePrgSize) = @_;
 
-        # update symtab section
-        $kernelSec->{SymbolEnt}{size} = $newSize;
+    my $elfHdr = $cubin->{elfHdr};
+    my $class  = $elfHdr->{fileClass};
+
+    # update section header
+    my $delta = $newSize - $sec->{size};
+    $sec->{size} = $newSize;
+
+    # update symtab section
+    if ($sec->{SymbolEnt})
+    {
+        $sec->{SymbolEnt}{size} = $newSize;
         my $symSection = $cubin->{'.symtab'};
         $symSection->{Data} = '';
         foreach my $symEnt (@{$symSection->{SymTab}})
         {
             $symSection->{Data} .= unpack "H*", pack $symHdrT[$class], @{$symEnt}{@{$symHdrC[$class]}};
         }
+    }
 
-        # update elf header offsets
-        $elfHdr->{phOffset} += $delta;
-        $elfHdr->{shOffset} += $delta;
+    my $pos = $elfHdr->{ehSize};
+    my %sizeMap;
 
-        # update section header offsets
-        foreach my $secHdr (@{$cubin->{secHdrs}})
+    # update section header offsets
+    foreach my $secHdr (@{$cubin->{secHdrs}})
+    {
+        # skip first header
+        next if $secHdr->{align} == 0;
+
+        # NOBITS data sections are size 0
+        my $size = $secHdr->{type} == 8 ? 0 : $secHdr->{size};
+
+        # Add any needed padding between sections
+        my $pad = $pos % $secHdr->{align};
+        if ($pad > 0)
         {
-            $secHdr->{offset} += $delta if $secHdr->{offset} > $kernelSec->{offset};
+            $pos += $secHdr->{align} - $pad;
         }
+        # map old offset to new
+        $sizeMap{$secHdr->{offset}} = $pos;
 
-        # update program header offsets and sizes
-        foreach my $prgHdr (@{$cubin->{prgHdrs}})
+        # update offset
+        $secHdr->{offset} = $pos;
+
+        # advance position by size
+        $pos += $size;
+    }
+
+    # compute total section header size
+    my $shSize = $elfHdr->{phOffset} - $elfHdr->{shOffset};
+
+    # map old offset to new
+    $sizeMap{$elfHdr->{shOffset}} = $pos;
+    $sizeMap{$elfHdr->{phOffset}} = $pos + $shSize;
+
+    $elfHdr->{shOffset} = $pos;
+    $elfHdr->{phOffset} = $pos + $shSize;
+
+    # update program header offsets and sizes
+    foreach my $prgHdr (@{$cubin->{prgHdrs}})
+    {
+        # Not sure how best to adjust these so just assume they'll track other offsets.
+        $prgHdr->{offset} = $sizeMap{$prgHdr->{offset}};
+
+        # If the kernel sizes changes, also update the associated ProgramHeader.
+        # Note that this size is the kernel size plus any constant section sizes.
+        if ($updatePrgSize && $prgHdr->{type} == 1 &&
+            $sec->{offset} >= $prgHdr->{offset} &&
+            $sec->{offset} < $prgHdr->{offset} + $prgHdr->{fileSize} + $delta)
         {
-            if ($kernelSec->{offset} < $prgHdr->{offset})
-            {
-                $prgHdr->{offset} += $delta;
-            }
-            # also update the size of any header that contains this kernel
-            elsif ($kernelSec->{offset} < $prgHdr->{offset} + $prgHdr->{fileSize})
-            {
-                $prgHdr->{fileSize} += $delta;
-                $prgHdr->{memSize}  += $delta;
-            }
+            $prgHdr->{fileSize} += $delta;
+            $prgHdr->{memSize}  += $delta;
         }
     }
 }

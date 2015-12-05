@@ -37,7 +37,6 @@ sub Assemble
     # initialize cubin counts
     my $regCnt = 0;
     my $barCnt = 0;
-    my $insCnt = 0;
 
     my ($lineNum, @instructs, %labels, $ctrl, @branches, %reuse);
 
@@ -57,9 +56,6 @@ sub Assemble
             # Save us from crashing the display driver
             die "It is illegal to set a Read-After-Write dependency on a memory store op (store ops don't write to a register)\n$inst->{inst}\n"
                 if exists $noDest{$inst->{op}} && ($inst->{ctrl} & 0x000e0) != 0x000e0;
-
-            # count the instructions for updating the cubin
-            $insCnt += 1 if $inst->{op} ne 'EXIT';
 
             # track branches/jumps/calls/etc for label remapping
             push @branches, @instructs+0 if exists $jumpOp{$inst->{op}};
@@ -474,7 +470,7 @@ sub Assemble
     }
 
     # final pass to piece together control codes
-    my (@codes, %reuseHistory);
+    my (@codes, %reuseHistory, @exitOffsets, @ctaidOffsets, $ctaidzUsed);
     foreach my $i (0 .. $#instructs)
     {
         # op code
@@ -487,6 +483,15 @@ sub Assemble
                 # calculate stats on registers
                 registerHealth(\%reuseHistory, $instructs[$i]{ctrl}{reuse}[($i & 3) - 1], $instructs[$i]{caps}, $i * 8, "$instructs[$i]{inst} ($instructs[$i]{orig})", $nowarn);
             }
+            if ($instructs[$i]{inst} =~ m'EXIT')
+            {
+                push @exitOffsets, (scalar(@codes)-1)*8;
+            }
+            elsif ($instructs[$i]{inst} =~ m'SR_CTAID\.(X|Y|Z)')
+            {
+                push @ctaidOffsets, (scalar(@codes)-1)*8;
+                $ctaidzUsed = 1 if $1 eq 'Z';
+            }
         }
         # control code
         else
@@ -497,16 +502,19 @@ sub Assemble
                 ($ruse->[0] << 17) | ($ruse->[1] << 38) | ($ruse->[2] << 59);  # reuse codes
         }
     }
+
     # return the kernel data
     return {
-        RegCnt => $regCnt,
-        BarCnt => $barCnt,
-        InsCnt => $insCnt,
-        ConflictCnt => $reuseHistory{conflicts},
-        ReuseCnt    => $reuseHistory{reuse},
-        ReuseTot    => $reuseHistory{total},
-        ReusePct    => ($reuseHistory{total} ? 100 * $reuseHistory{reuse} / $reuseHistory{total} : 0),
-        KernelData  => \@codes,
+        RegCnt       => $regCnt,
+        BarCnt       => $barCnt,
+        ExitOffsets  => \@exitOffsets,
+        CTAIDOffsets => \@ctaidOffsets,
+        CTAIDZUsed   => $ctaidzUsed,
+        ConflictCnt  => $reuseHistory{conflicts},
+        ReuseCnt     => $reuseHistory{reuse},
+        ReuseTot     => $reuseHistory{total},
+        ReusePct     => ($reuseHistory{total} ? 100 * $reuseHistory{reuse} / $reuseHistory{total} : 0),
+        KernelData   => \@codes,
     };
 }
 
