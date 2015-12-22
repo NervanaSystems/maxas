@@ -904,6 +904,8 @@ sub Scheduler
                         push @src, "P$p";
                     }
                 }
+                # These instructions can't be dual issued
+                $instruct->{nodual} = 1;
             }
 
             # Populate our register source and destination lists, skipping any zero or true values
@@ -1080,7 +1082,7 @@ sub Scheduler
             }
             # dual issue with a simple instruction (tput <= 2)
             # can't dual issue two instructions that both load a constant
-            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} <= 2 &&
+            elsif ($ready->{dual} && !$instruct->{dual} && $instruct->{tput} <= 2 && !$instruct->{nodual} &&
                    $stall == 1 && $ready->{exeTime} <= $clock && !($ready->{const} && $instruct->{const}))
             {
                 $stall = 0;
