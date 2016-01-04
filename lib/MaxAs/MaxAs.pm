@@ -694,7 +694,7 @@ sub Extract
                 my $target = hex($1);
 
                 # skip the final BRA and stop processing the file
-                last FILE if $inst->{op} eq 'BRA' && $target == $inst->{num};
+                last FILE if $inst->{op} eq 'BRA' && ($target == $inst->{num} || $target == $inst->{num}-8);
 
                 # check to see if we've already generated a label for this target address
                 my $label = $labels{$target};
@@ -707,7 +707,7 @@ sub Extract
                 # replace address with name
                 $inst->{ins} =~ s/(0x[0-9a-f]+)/$label/;
             }
-            $inst->{ins} =~ s/(c\[0x0\])\s*(\[0x[0-9a-f]+\])/ $paramMap{$1 . $2} || $1 /eg;
+            $inst->{ins} =~ s/(c\[0x0\])\s*(\[0x[0-9a-f]+\])/ $paramMap{$1 . $2} || $1 . $2 /eg;
 
             $inst->{ctrl} = printCtrl($ctrl);
 
