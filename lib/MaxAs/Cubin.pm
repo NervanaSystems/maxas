@@ -303,20 +303,22 @@ sub new
                     unshift @params, "$ord:$offset:$psize:$align";
                     $idx += 4;
                 }
-                my @staticParams = @data[0 .. $idx];
+                my @staticParams = @data[0 .. ($idx-1)];
 
-                # MAXREG_COUNT
-                $idx++;
-
-                my (@exitOffsets, @ctaidOffsets, $ctaidzUsed, @reqntid, @maxntid);
+                my ($maxregCount, @exitOffsets, @ctaidOffsets, $ctaidzUsed, @reqntid, @maxntid, @stackSize);
                 while ($idx < @data)
                 {
                     my $code = $data[$idx] & 0xffff;
                     my $size = $data[$idx] >> 16;
                     $idx++;
 
+                    # EIATTR_MAXREG_COUNT
+                    if ($code == 0x1b03)
+                    {
+                        $maxregCount = $size;
+                    }
                     # EIATTR_S2RCTAID_INSTR_OFFSETS
-                    if ($code == 0x1d04)
+                    elsif ($code == 0x1d04)
                     {
                         while ($size > 0)
                         {
@@ -356,20 +358,31 @@ sub new
                             $size -= 4;
                         }
                     }
+                    # EIATTR_CRS_STACK_SIZE
+                    elsif ($code == 0x1e04)
+                    {
+                        while ($size > 0)
+                        {
+                            push @stackSize, $data[$idx++];
+                            $size -= 4;
+                        }
+                    }
                     else
                     {
-                        printf "Unknown Code 0x%02x (size:%d)\n", $code, $size;
+                        printf STDERR "Unknown Code 0x%02x (size:%d)\n", $code, $size;
                     }
                 }
                 $kernelSec->{Params}   = \@params;
                 $kernelSec->{ParamCnt} = scalar @params;
 
                 $paramSec->{StaticParams} = \@staticParams;
+                $paramSec->{MAXREG_COUNT} = $maxregCount;
                 $paramSec->{ExitOffsets}  = \@exitOffsets;
                 $paramSec->{CTAIDOffsets} = \@ctaidOffsets;
                 $paramSec->{CTAIDZUsed}   = $ctaidzUsed;
                 $paramSec->{REQNTID}      = \@reqntid;
                 $paramSec->{MAXNTID}      = \@maxntid;
+                $paramSec->{STACKSIZE}    = \@stackSize;
             }
             # print Dumper($paramSec);
             # exit();
@@ -393,7 +406,7 @@ sub new
     #     print "prgHdr($p): type: $prgHdr->{type}, offset: $prgHdr->{offset}, fileSize: $prgHdr->{fileSize}, memSize: $prgHdr->{memSize}, align: $prgHdr->{align}\n";
     #     $p++;
     # }
-    #exit();
+    # exit();
 
     # print Dumper($cubin->{prgHdrs});
     # exit();
@@ -442,8 +455,10 @@ sub modifyKernel
     die "new kernel size must be multiple of 8 instructions (64 bytes)" if $newSize & 63;
     die "16 is max barrier count" if $newBar > 16;
 
-    my $paramSec = $kernelSec->{ParamSec};
-    my $kernelName = $kernelSec->{SymbolEnt}{Name};
+    my $paramSec    = $kernelSec->{ParamSec};
+    my $kernelName  = $kernelSec->{SymbolEnt}{Name};
+    my $maxregCount = $paramSec->{MAXREG_COUNT};
+    my $stackSize   = $paramSec->{STACKSIZE};
 
     # update the kernel
     $kernelSec->{KernelData} = $newData;
@@ -465,6 +480,11 @@ sub modifyKernel
     }
 
     my @paramData = @{$paramSec->{StaticParams}};
+
+    if (defined $maxregCount)
+    {
+        push @paramData, ($maxregCount << 16) | 0x1b03;
+    }
 
     my $newCTAIDs = join ',', map { sprintf '%04x', $_ } @$ctaidOffsets;
     my $oldCTAIDs = join ',', map { sprintf '%04x', $_ } @{$paramSec->{CTAIDOffsets}};
@@ -510,6 +530,12 @@ sub modifyKernel
     {
         push @paramData, (scalar(@{$paramSec->{MAXNTID}}) << 18) | 0x0504;
         push @paramData, @{$paramSec->{MAXNTID}};
+    }
+
+    if (@$stackSize)
+    {
+        push @paramData, (scalar(@$stackSize) << 18) | 0x1e04;
+        push @paramData, @$stackSize;
     }
 
     my $newParamSize  = scalar(@paramData)*4;
