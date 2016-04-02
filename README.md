@@ -21,7 +21,7 @@ See wiki pages for more information:
 
 Related work with lots of additional shader assembly (sass) examples:
 
-- [NervanaGPU](https://github.com/NervanaSystems/nervanagpu)
+- [Nervana Neon](https://github.com/NervanaSystems/neon)
 
 This project is released under the [MIT License](http://opensource.org/licenses/MIT).
 
