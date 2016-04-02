@@ -364,7 +364,7 @@ our %grammar =
     CSET   => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSET[^;]*;"o,  } ], #TODO
     CSETP  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSETP[^;]*;"o, } ], #TODO
     P2R    => [ { type => $x32T,  code => 0x38e8000000000000, rule => qr"^$pred?P2R $r0, PR, $r8, $i20w7;"o,   } ],
-    R2P    => [ { type => $cmpT,  code => 0x38f0000000000000, rule => qr"^$pred?R2P PR, $r8, $i20w7;"o,   } ],
+    R2P    => [ { type => $shftT, code => 0x38f0000000000000, rule => qr"^$pred?R2P PR, $r8, $i20w7;"o,   } ],
 
     #Texture Instructions
     # Handle the commonly used 1D texture functions.. but save the others for later
@@ -1296,7 +1296,7 @@ sub replaceXMADs
 # ----------------------
 # XMAD d, a, 0xffff, c;
 # XMAD.PSL d, a.H1, 0xffff, d;
-    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>\w+)\s*,\s*(?<c>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<x>\w+)\s*;$CommRe/
+    $file =~ s/\n\s*$CtrlRe(?<space>\s+)($PredRe)?XMAD\.LO\s+(?<d>\w+)\s*,\s*(?<a>\w+)\s*,\s*(?<b>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<c>c\[$hex\]\[$hex\]|\w+)\s*,\s*(?<x>\w+)\s*;$CommRe/
 
         die "XMAD.LO: Destination and first operand cannot be the same register ($+{d})." if $+{d} eq $+{a};
         sprintf '

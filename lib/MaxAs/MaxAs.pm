@@ -845,6 +845,8 @@ sub Scheduler
             #$inst->{first}   = $inst->{ctrl} & 0x0000f ? 1 : 2;
             $inst->{exeTime} = 0;
             $inst->{order}   = $ordered++ if $ordered;
+            $inst->{force_stall} = $inst->{ctrl} & 0xf if $inst->{comment} =~ m'FORCE';
+
             push @instructs, $inst;
         }
         # match a label
@@ -869,7 +871,6 @@ sub Scheduler
             die "badly formed line at block: $blockNum line: $lineNum: $line\n";
         }
     }
-
     my (%writes, %reads, @ready, @schedule, $orderedParent);
     # assemble the instructions to op codes
     foreach my $instruct (@instructs)
@@ -882,6 +883,8 @@ sub Scheduler
 
             # copy over instruction types for easier access
             @{$instruct}{@itypes} = @{$gram->{type}}{@itypes};
+
+            $instruct->{dualCnt} = $instruct->{dual} ? 1 : 0;
 
             # A predicate prefix is treated as a source reg
             push @src, $instruct->{predReg} if $instruct->{pred};
@@ -971,7 +974,7 @@ sub Scheduler
             # Enforce instruction ordering where requested
             if ($instruct->{order})
             {
-                if ($orderedParent)
+                if ($orderedParent && $instruct->{order} > $orderedParent->{order})
                 {
                     push @{$orderedParent->{children}}, [$instruct, 0];
                     $instruct->{parents}++;
@@ -1010,13 +1013,14 @@ sub Scheduler
         @ready = sort {
             $a->{first}   <=> $b->{first}  ||
             $b->{deps}    <=> $a->{deps}   ||
+            $a->{dualCnt} <=> $b->{dualCnt}  ||
             $a->{lineNum} <=> $b->{lineNum}
             } @ready;
 
         if ($debug)
         {
             print  "0: Initial Ready List State:\n\tf,ext,stl,mix,dep,lin, inst\n";
-            printf "\t%d,%3s,%3s,%3s,%3s,%3s, %s\n", @{$_}{qw(first exeTime stall mix deps lineNum inst)} foreach @ready;
+            printf "\t%d,%3s,%3s,%3s,%3s,%3s,%3s, %s\n", @{$_}{qw(first exeTime stall dualCnt mix deps lineNum inst)} foreach @ready;
         }
     }
 
@@ -1030,6 +1034,8 @@ sub Scheduler
         if (@schedule && $stall < 16)
         {
             my $prev = $schedule[$#schedule];
+
+            $stall = $prev->{force_stall} if $prev->{force_stall} > $stall;
 
             # if stall is greater than 4 then also yield
             # the yield flag is required to get stall counts 12-15 working correctly.
@@ -1091,12 +1097,14 @@ sub Scheduler
 
             # add an instruction class mixing huristic that catches anything not handled by the stall
             $ready->{mix} = $ready->{class} ne $instruct->{class} || 0;
+            $ready->{mix} = 2 if $ready->{mix} && $ready->{op} eq 'R2P';
         }
 
         # sort the ready list by stall time, mixing huristic, dependencies and line number
         @ready = sort {
             $a->{first}   <=> $b->{first}  ||
             $a->{stall}   <=> $b->{stall}  ||
+            $a->{dualCnt} <=> $b->{dualCnt}  ||
             $b->{mix}     <=> $a->{mix}    ||
             $b->{deps}    <=> $a->{deps}   ||
             $a->{lineNum} <=> $b->{lineNum}
@@ -1104,8 +1112,13 @@ sub Scheduler
 
         if ($debug)
         {
-            print  "\tf,ext,stl,mix,dep,lin, inst\n";
-            printf "\t%d,%3s,%3s,%3s,%3s,%3s, %s\n", @{$_}{qw(f exeTime stall mix deps lineNum inst)} foreach @ready;
+            print  "\tf,ext,stl,duc,mix,dep,lin, inst\n";
+            printf "\t%d,%3s,%3s,%3s,%3s,%3s,%3s, %s\n", @{$_}{qw(f exeTime stall dualCnt mix deps lineNum inst)} foreach @ready;
+        }
+
+        foreach my $ready (@ready)
+        {
+            $ready->{dualCnt} = 0 if $ready->{dualCnt} && $ready->{stall} == 1;
         }
     }
 
@@ -1270,7 +1283,7 @@ sub countUniqueDescendants
 {
     my ($node, $edges) = @_;
 
-    #warn "$node->{inst}\n";
+    #print "P:$node->{inst}\n";
 
     if (my $children = $node->{children})
     {
@@ -1279,6 +1292,12 @@ sub countUniqueDescendants
             next if $edges->{"$node->{lineNum}^$child->[0]{lineNum}"}++;
 
             $node->{deps}{$_}++ foreach countUniqueDescendants($child->[0], $edges);
+        }
+        foreach my $child (grep !$_->[1], @$children) # WaR deps
+        {
+            next if $edges->{"$node->{lineNum}^$child->[0]{lineNum}"}++;
+
+            1 foreach countUniqueDescendants($child->[0], $edges);
         }
     }
     else
