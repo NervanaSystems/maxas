@@ -1354,27 +1354,30 @@ sub printCtrl
     $watdb = $watdb ? sprintf('%02x', $watdb) : '--';
 
     my @codes;
-    if($watdb ne '--') {
-#       $res += "waitdep="
-        push @codes, "waitbarrier=$watdb";
+    if($readb ne '-') {
+        push @codes, "setReadBarrier($readb)";
     }
     if($wrtdb ne '-') {
-#       $res += "waitdep="
-        push @codes, "writebarrier=$wrtdb";
+        push @codes, "setWriteBarrier($wrtdb)";
     }
-    if($readb ne '-') {
-#       $res += "waitdep="
-        push @codes, "readbarrier=$readb";
+    if($watdb ne '--') {
+        my @barriers;
+        for(my $barrier=1; $barrier <= 6; $barrier++) {
+            my $bitvalue = 1 << ($barrier - 1);
+            if($watdb & $bitvalue) {
+                push @barriers, $barrier;
+            }
+        }
+        my $barrierstring = sprintf "waitBarriers([%s])", join(",", @barriers);
+        push @codes, $barrierstring;
     }
     if($yield ne '-') {
-#       $res += "waitdep="
-        push @codes, "yield";
+        push @codes, "yield()";
     }
     if($stall > 0) {
-#       $res += "waitdep="
-        push @codes, "stall=$stall";
+        push @codes, "stall($stall)";
     }
-    my $res = join(",", @codes);
+    my $res = join(";", @codes);
     if($res ne "") {
       $res = join("", "# ", $res, "\n");
     }
