@@ -686,6 +686,9 @@ sub Extract
         {
             $line = <$in>;
 
+            # skip superfluous (?) braces in cuobjdump output
+            $line =~ s/{//g;
+            $line =~ s/}//g;
             my $inst = processSassLine($line) or next CTRL;
 
             # Convert branch/jump/call addresses to labels
