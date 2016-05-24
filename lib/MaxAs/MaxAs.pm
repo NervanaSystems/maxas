@@ -666,14 +666,14 @@ sub extract_preprocess
     my $linecount = 0;
     my $operationline = 0;
     my $codeline = 0;
-    foreach my $line (@operations) {
+    while($operationline < scalar @operations) {
         my $newline = "";
         if($linecount % 4 == 0) { # output code
             $newline = sprintf "                                  /* %s */", $controls[$codeline];
             $codeline++;
         } else {
             # no need for code
-            $newline = sprintf "    /*1234*/ %s /* 0x123456 */", $operations[$operationline];
+            $newline = sprintf "    /*%.4x*/ %s /* 0x123456 */", $linecount * 8, $operations[$operationline];
             $operationline++;
         }
         push @newlines, $newline;
@@ -741,7 +741,7 @@ sub Extract
     my @lines = extract_preprocess($in);
 
     my @data;
-    for(my $i = 0; $i < scalar @lines; $i++)
+    FILE: for(my $i = 0; $i < scalar @lines; $i++)
     {
         my $line = $lines[$i];
         my (@ctrl, @ruse);
