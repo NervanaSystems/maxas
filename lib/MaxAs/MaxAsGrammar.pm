@@ -245,6 +245,8 @@ my $atom  = qr"(?<E>\.E)?(?:\.(?<mode>ADD|MIN|MAX|INC|DEC|AND|OR|XOR|EXCH|CAS))(
 my $vote  = qr"\.(?<mode>ALL|ANY|EQ)"o;
 my $memType  = qr"(?<type>\.U8|\.S8|\.U16|\.S16||\.32|\.64|\.128)";
 my $memCache = qr"(?<E>\.E)?(?<U>\.U)?(?:\.(?<cache>CG|CI|CS|CV|IL|WT))?";
+my $dptype = qr"(?:\.(?<type1>U32|S32))?(?:\.(?<type2>U32|S32))?";
+my $dpmode = qr"\.(?<mode>LO|HI)";
 
 
 
@@ -446,6 +448,9 @@ our %grammar =
     VMNMX    => [ { type => $shftT, code => 0x3a44000000000000, rule => qr"^$pred?VMNMX$vaddType$vmnmx$sat$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
 
     VSET => [ { type => $shftT, code => 0x4004000000000000, rule => qr"^$pred?VSET$icmp$vaddType$vaddMode $r0, $r8, $r20, $r39;"o, } ], #Partial 0x2044000000000000
+
+    DP4A => [ { type => $x32T,   code => 0x53f8000000000000, rule => qr"^$pred?DP4A$dptype $r0, $r8, $icr20, $r39;"o, } ],
+    DP2A => [ { type => $x32T,   code => 0x53f9000000000000, rule => qr"^$pred?DP2A$dpmode$dptype $r0, $r8, $icr20, $r39;"o, } ],
 );
 
 # Create map of capture groups to op code flags that need to be added (or removed)
@@ -1070,6 +1075,18 @@ ATOMS: mode
 0x0070000000000000 XOR
 0x0080000000000000 EXCH
 0x0240000000000000 CAS
+
+DP4A, DP2A: type1
+0x0000000000000000 U32
+0x0002000000000000 S32
+
+DP4A, DP2A: type2
+0x0000000000000000 U32
+0x0000800000000000 S32
+
+DP2A: mode
+0x0000000000000000 LO
+0x0004000000000000 HI
 };
 
 # The existence of a capture group can map directly to an op code adjustment, or...
