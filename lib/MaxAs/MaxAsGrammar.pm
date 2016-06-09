@@ -167,11 +167,11 @@ my $p48     = qr"(?<p48>$p)"o;
 my $p58     = qr"(?<p58>$p)"o;
 my $r0      = qr"(?<r0>$reg)";
 my $r0cc    = qr"(?<r0>$reg)(?<CC>\.CC)?";
-my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1|B0|B1|B2|B3|H0_H0|H1_H1))?(?<reuse1>\.reuse)?";
+my $r8      = qr"(?<r8neg>\-)?(?<r8abs>\|)?(?<r8>$reg)\|?(?:\.(?<r8part>H0|H1|B0|B1|B2|B3|H0_H0|H1_H1|F32))?(?<reuse1>\.reuse)?";
 my $r20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r20>$reg)\|?(?:\.(?<r20part>H0|H1|B0|B1|B2|B3|H0_H0|H1_H1))?(?<reuse2>\.reuse)?";
 my $r28     = qr"(?<r28>$reg)";
 my $r39s20  = qr"(?<r20neg>\-)?(?<r20abs>\|)?(?<r39s20>(?<r20>$reg))\|?(?:\.(?<r39part>H0|H1))?(?<reuse2>\.reuse)?";
-my $r39     = qr"(?<r39neg>\-)?(?<r39>$reg)(?:\.(?<r39part>H0|H1))?(?<reuse3>\.reuse)?";
+my $r39     = qr"(?<r39neg>\-)?(?<r39>$reg)(?:\.(?<r39part>H0|H1|H0_H0|H1_H1|F32))?(?<reuse3>\.reuse)?";
 my $r39a    = qr"(?<r39a>(?<r39>$reg))(?<reuse3>\.reuse)?";
 my $c20     = qr"(?<r20neg>\-)?(?<r20abs>\|)?c\[(?<c34>$hex)\]\s*\[(?<c20>$hex)\]\|?(?:\.(?<r20part>H0|H1|B0|B1|B2|B3))?"o;
 my $c20x    = qr"(?<r20neg>\-)?(?<r20abs>\|)?c\[(?<c34>$hex)\]\s*\[(?<c20>$hex)\]\|?(?:\.(?<r20partx>H0|H1|B0|B1|B2|B3))?"o;
@@ -206,6 +206,7 @@ my $dr20    = qr"$d20|$r20"o;
 # Instruction specific rules for capturing various flags
 my $u32   = qr"(?<U32>\.U32)?";
 my $ftz   = qr"(?<FTZ>\.FTZ)?";
+my $fmz   = qr"(?<FMZ>\.FMZ)?";
 my $sat   = qr"(?<SAT>\.SAT)?";
 my $rnd   = qr"(?:\.(?<rnd>RN|RM|RP|RZ))?";
 my $round = qr"(?:\.(?<round>ROUND|FLOOR|CEIL|TRUNC))?";
@@ -247,8 +248,7 @@ my $memType  = qr"(?<type>\.U8|\.S8|\.U16|\.S16||\.32|\.64|\.128)";
 my $memCache = qr"(?<E>\.E)?(?<U>\.U)?(?:\.(?<cache>CG|CI|CS|CV|IL|WT))?";
 my $dptype = qr"(?:\.(?<type1>U32|S32))?(?:\.(?<type2>U32|S32))?";
 my $dpmode = qr"\.(?<mode>LO|HI)";
-
-
+my $hmode  = qr"(?:\.(?<mode>F32|MRG_H0|MRG_H1))?$ftz";
 
 # class: hardware resource that shares characteristics with types
 # lat  : pipeline depth where relevent, placeholder for memory ops
@@ -300,9 +300,9 @@ our %grammar =
     DSETP    => [ { type => $cmpT,  code => 0x5b80000000000000, rule => qr"^$pred?DSETP$fcmp$bool $p3, $p0, $r8, $dr20, $p39;"o,      } ],
     FSWZADD  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?FSWZADD[^;]*;"o,                                    } ], #TODO
 
-    HADD2     => [ { type => $x32T,  code => 0x5d10000000000000, rule => qr"^$pred?HADD2$ftz $r0, $r8, $r20;"o,               } ],
-    HMUL2     => [ { type => $x32T,  code => 0x5d08000000000000, rule => qr"^$pred?HMUL2$ftz $r0, $r8, $r20;"o,               } ],
-    HFMA2     => [ { type => $x32T,  code => 0x5d00000000000000, rule => qr"^$pred?HFMA2$ftz $r0, $r8, $r20, $r39;"o,         } ],
+    HADD2     => [ { type => $x32T,  code => 0x5d10000000000000, rule => qr"^$pred?HADD2$hmode$fmz$ftz$sat $r0, $r8, $r20;"o,               } ],
+    HMUL2     => [ { type => $x32T,  code => 0x5d08000000000000, rule => qr"^$pred?HMUL2$hmode$fmz$ftz$sat $r0, $r8, $r20;"o,               } ],
+    HFMA2     => [ { type => $x32T,  code => 0x5d00000000000000, rule => qr"^$pred?HFMA2$hmode$fmz$ftz$sat $r0, $r8, $r20, $r39;"o,         } ],
     HSETP2    => [ { type => $cmpT,  code => 0x5d20000000000000, rule => qr"^$pred?HSETP2$fcmp$bool $p3, $p0, $r8, $fcr20, $p39;"o, } ], #Partial
 
     #Integer Instructions
@@ -786,13 +786,40 @@ F2I: round
 0x0000010000000000 CEIL
 0x0000018000000000 TRUNC
 
-HADD2, HMUL2: r8part
+HADD2, HMUL2, HFMA2: r8part
 0x0001000000000000 H0_H0
-0x0000000000000000 H1_H1
+0x0001800000000000 H1_H1
+0x0000800000000000 F32
 
-HFMA2: r20part
+HADD2, HMUL2, HFMA2: r20part
 0x0000000020000000 H0_H0
 0x0000000030000000 H1_H1
+
+HFMA2: r39part
+0x0000000800000000 F32
+0x0000001000000000 H0_H0
+0x0000001800000000 H1_H1
+
+HADD2, HMUL2, HFMA2
+0x0000000080000000 r20neg
+0x0000000040000000 r39neg
+
+HADD2, HMUL2, HFMA2: mode
+0x0002000000000000 F32
+0x0004000000000000 MRG_H0
+0x0006000000000000 MRG_H1
+
+HADD2, HMUL2
+0x0000008000000000 FTZ
+
+HFMA2
+0x0000002000000000 FTZ
+
+HFMA2
+0x0000004000000000 FMZ
+
+HADD2, HMUL2, HFMA2
+0x0000000100000000 SAT
 
 FADD, DADD, FMUL, DMUL, F2F, I2F: rnd
 0x0000000000000000 RN
@@ -829,12 +856,6 @@ FSET
 
 FSETP, FCMP
 0x0000800000000000 FTZ
-
-HADD2, HMUL2
-0x0000008000000000 FTZ
-
-HFMA2
-0x0000002000000000 FTZ
 
 FADD, FFMA, FMUL, F2F, I2I
 0x0004000000000000 SAT
