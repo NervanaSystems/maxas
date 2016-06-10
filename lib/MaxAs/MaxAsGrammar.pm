@@ -223,8 +223,8 @@ my $tld   = qr"(?<NODEP>NODEP\.)?(?:(?<reuse1>T)|(?<reuse2>P))";
 my $chnls = qr"(?<chnls>R|RGBA)";
 my $sr    = qr"SR_(?<sr>\S+)";
 my $shf   = qr"(?<W>\.W)?(?:\.(?<type>U64|S64))?(?<HI>\.HI)?";
-my $xmad  = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<mode>MRG|PSL|CHI|CLO|CSFU))?(?<CBCC>\.CBCC)?";
-my $xmadc = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<modec>MRG|PSL|CHI|CLO|CSFU))?(?<CBCC>\.CBCC)?";
+my $xmad  = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<mode>MRG|PSL\.CLO|PSL|CHI|CLO|CSFU))?(?<CBCC>\.CBCC)?";
+my $xmadc = qr"(?:\.(?<type1>U16|S16))?(?:\.(?<type2>U16|S16))?(?:\.(?<modec>MRG|PSL\.CLO|PSL|CHI|CLO|CSFU))?(?<CBCC>\.CBCC)?";
 my $vmad8 = qr"\.(?<sign1>[SU])(?<size1>8|16)\.(?<sign2>[SU])(?<size2>8|16)(?<PO>\.PO)?(?<SHR_7>\.SHR_7)?(?<SHR_15>\.SHR_15)?(?<SAT>\.SAT)?";
 my $vmad16= qr"\.(?<sign1>[SU])(?<size1>16)\.(?<sign2>[SU])(?<size2>16)";
 my $hilo  = qr"(?:\.(?<mode>XHI|XLO))?";
@@ -570,6 +570,7 @@ XMAD: mode
 0x0008000000000000 CHI
 0x0004000000000000 CLO
 0x000c000000000000 CSFU
+0x0004001000000000 PSL.CLO
 
 XMAD: modec
 0x0004000000000000 CLO
@@ -578,6 +579,7 @@ XMAD: modec
 0x0040000000000000 X
 0x0080000000000000 PSL
 0x0100000000000000 MRG
+0x0084000000000000 PSL.CLO
 
 XMAD
 0x0010000000000000 CBCC
