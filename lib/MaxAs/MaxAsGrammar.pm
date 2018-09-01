@@ -214,6 +214,7 @@ my $fcmp  = qr"(?<cmp>\.LT|\.EQ|\.LE|\.GT|\.NE|\.GE|\.NUM|\.NAN|\.LTU|\.EQU|\.LE
 my $icmp  = qr"\.(?<cmp>LT|EQ|LE|GT|NE|GE)";
 my $bool  = qr"\.(?<bool>AND|OR|XOR|PASS_B)";
 my $bool2 = qr"\.(?<bool2>AND|OR|XOR)";
+my $ccbool = qr"\.(?<ccbool>F|LT|EQ|LE|GT|NE|GE|NUM|NAN|LTU|EQU|LEU|GTU|NEU|GEU|UNK|OFF|LO|SFF|LS|HI|SFT|HS|OFT|CSM_TA|CSM_TR|CSM_MX|FCSM_TA|RLE|RGT)";
 my $func  = qr"\.(?<func>COS|SIN|EX2|LG2|RCP|RSQ|RCP64H|RSQ64H)";
 my $rro   = qr"\.(?<func>SINCOS|EX2)";
 my $add3  = qr"(?:\.(?<type>X|RS|LS))?";
@@ -363,8 +364,8 @@ our %grammar =
     #Predicate/CC Instructions
     PSET   => [ { type => $cmpT,  code => 0x5088000000000000, rule => qr"^$pred?PSET$bool2$bool $r0, $p12, $p29, $p39;"o,       } ],
     PSETP  => [ { type => $cmpT,  code => 0x5090000000000000, rule => qr"^$pred?PSETP$bool2$bool $p3, $p0, $p12, $p29, $p39;"o, } ],
-    CSET   => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSET[^;]*;"o,  } ], #TODO
-    CSETP  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSETP[^;]*;"o, } ], #TODO
+    CSET   => [ { type => $x32T,  code => 0x5098000000000000, rule => qr"^$pred?CSET$ccbool$bool2 $r0, $p39;"o,  } ],
+    CSETP  => [ { type => $x32T,  code => 0x50a0000000000000, rule => qr"^$pred?CSETP$ccbool$bool2 $p3, $p0, $p39;"o, } ],
     P2R    => [ { type => $x32T,  code => 0x38e8000000000000, rule => qr"^$pred?P2R $r0, PR, $r8, $i20w7;"o,   } ],
     R2P    => [ { type => $shftT, code => 0x38f0000000000000, rule => qr"^$pred?R2P PR, $r8, $i20w7;"o,   } ],
 
@@ -520,6 +521,45 @@ ISETP, ISET, PSETP, PSET: bool
 0x0000400000000000 XOR
 
 PSETP, PSET: bool2
+0x0000000000000000 AND
+0x0000000001000000 OR
+0x0000000002000000 XOR
+
+CSETP, CSET: ccbool
+0x0000000000000000 F
+0x0000010000000000 LT
+0x0000020000000000 EQ
+0x0000030000000000 LE
+0x0000040000000000 GT
+0x0000050000000000 NE
+0x0000060000000000 GE
+0x0000070000000000 NUM
+0x0000080000000000 NAN
+0x0000090000000000 LTU
+0x00000a0000000000 EQU
+0x00000b0000000000 LEU
+0x00000c0000000000 GTU
+0x00000d0000000000 NEU
+0x00000e0000000000 GEU
+0x00000f0000000000 UNK
+0x0000100000000000 OFF
+0x0000110000000000 LO
+0x0000120000000000 SFF
+0x0000130000000000 LS
+0x0000140000000000 HI
+0x0000150000000000 SFT
+0x0000160000000000 HS
+0x0000170000000000 OFT
+0x0000180000000000 CSM_TA
+0x0000190000000000 CSM_TR
+0x00001a0000000000 CSM_MX
+0x00001b0000000000 FCSM_TA
+0x00001c0000000000 FCSM_TR
+0x00001d0000000000 FCSM_MX
+0x00001e0000000000 RLE
+0x00001f0000000000 RGT
+
+CSETP, CSET: bool2
 0x0000000000000000 AND
 0x0000000001000000 OR
 0x0000000002000000 XOR
@@ -1472,6 +1512,3 @@ sub getAddrVecRegisters
 }
 
 __END__
-
-
-
