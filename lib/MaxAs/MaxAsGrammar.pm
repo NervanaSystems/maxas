@@ -214,6 +214,7 @@ my $fcmp  = qr"(?<cmp>\.LT|\.EQ|\.LE|\.GT|\.NE|\.GE|\.NUM|\.NAN|\.LTU|\.EQU|\.LE
 my $icmp  = qr"\.(?<cmp>LT|EQ|LE|GT|NE|GE)";
 my $bool  = qr"\.(?<bool>AND|OR|XOR|PASS_B)";
 my $bool2 = qr"\.(?<bool2>AND|OR|XOR)";
+my $ccbool = qr"\.(?<ccbool>F|LT|EQ|LE|GT|NE|GE|NUM|NAN|LTU|EQU|LEU|GTU|NEU|GEU|UNK|OFF|LO|SFF|LS|HI|SFT|HS|OFT|CSM_TA|CSM_TR|CSM_MX|FCSM_TA|RLE|RGT)";
 my $func  = qr"\.(?<func>COS|SIN|EX2|LG2|RCP|RSQ|RCP64H|RSQ64H)";
 my $rro   = qr"\.(?<func>SINCOS|EX2)";
 my $add3  = qr"(?:\.(?<type>X|RS|LS))?";
@@ -351,7 +352,7 @@ our %grammar =
     F2F => [ { type => $qtrT,  code => 0x5ca8000000000000, rule => qr"^$pred?F2F$ftz$x2x$rnd$round$sat $r0, $cr20;"o, } ],
     F2I => [ { type => $qtrT,  code => 0x5cb0000000000000, rule => qr"^$pred?F2I$ftz$x2x$round $r0, $cr20;"o,         } ],
     I2F => [ { type => $qtrT,  code => 0x5cb8000000000000, rule => qr"^$pred?I2F$x2x$rnd $r0, $cr20;"o,               } ],
-    I2I => [ { type => $qtrT,  code => 0x5ce0000000000000, rule => qr"^$pred?I2I$x2x$sat $r0, $cr20;"o,               } ],
+    I2I => [ { type => $qtrT,  code => 0x5ce0000000000000, rule => qr"^$pred?I2I$x2x$sat $r0cc, $cr20;"o,               } ],
 
     #Movement Instructions
     MOV    => [ { type => $x32T,  code => 0x5c98078000000000, rule => qr"^$pred?MOV $r0, $icr20;"o,                   } ],
@@ -363,8 +364,8 @@ our %grammar =
     #Predicate/CC Instructions
     PSET   => [ { type => $cmpT,  code => 0x5088000000000000, rule => qr"^$pred?PSET$bool2$bool $r0, $p12, $p29, $p39;"o,       } ],
     PSETP  => [ { type => $cmpT,  code => 0x5090000000000000, rule => qr"^$pred?PSETP$bool2$bool $p3, $p0, $p12, $p29, $p39;"o, } ],
-    CSET   => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSET[^;]*;"o,  } ], #TODO
-    CSETP  => [ { type => $x32T,  code => 0x0000000000000000, rule => qr"^$pred?CSETP[^;]*;"o, } ], #TODO
+    CSET   => [ { type => $x32T,  code => 0x5098000000000000, rule => qr"^$pred?CSET$ccbool$bool2 $r0, $p39;"o,  } ],
+    CSETP  => [ { type => $x32T,  code => 0x50a0000000000000, rule => qr"^$pred?CSETP$ccbool$bool2 $p3, $p0, $p39;"o, } ],
     P2R    => [ { type => $x32T,  code => 0x38e8000000000000, rule => qr"^$pred?P2R $r0, PR, $r8, $i20w7;"o,   } ],
     R2P    => [ { type => $shftT, code => 0x38f0000000000000, rule => qr"^$pred?R2P PR, $r8, $i20w7;"o,   } ],
 
@@ -469,7 +470,7 @@ PSET, PSETP
 FMNMX, FSET, FSETP, DMNMX, DSET, DSETP, IMNMX, ISET, ISETP, SEL, PSET, PSETP, BAR, VOTE
 0x0000040000000000 p39not
 
-IADD, IADD3, XMAD, LEA, IMNMX
+IADD, IADD3, XMAD, LEA, IMNMX, I2I
 0x0000800000000000 CC
 
 IADD32I
@@ -520,6 +521,45 @@ ISETP, ISET, PSETP, PSET: bool
 0x0000400000000000 XOR
 
 PSETP, PSET: bool2
+0x0000000000000000 AND
+0x0000000001000000 OR
+0x0000000002000000 XOR
+
+CSETP, CSET: ccbool
+0x0000000000000000 F
+0x0000000000000100 LT
+0x0000000000000200 EQ
+0x0000000000000300 LE
+0x0000000000000400 GT
+0x0000000000000500 NE
+0x0000000000000600 GE
+0x0000000000000700 NUM
+0x0000000000000800 NAN
+0x0000000000000900 LTU
+0x0000000000000a00 EQU
+0x0000000000000b00 LEU
+0x0000000000000c00 GTU
+0x0000000000000d00 NEU
+0x0000000000000e00 GEU
+0x0000000000000f00 UNK
+0x0000000000001000 OFF
+0x0000000000001100 LO
+0x0000000000001200 SFF
+0x0000000000001300 LS
+0x0000000000001400 HI
+0x0000000000001500 SFT
+0x0000000000001600 HS
+0x0000000000001700 OFT
+0x0000000000001800 CSM_TA
+0x0000000000001900 CSM_TR
+0x0000000000001a00 CSM_MX
+0x0000000000001b00 FCSM_TA
+0x0000000000001c00 FCSM_TR
+0x0000000000001d00 FCSM_MX
+0x0000000000001e00 RLE
+0x0000000000001f00 RGT
+
+CSETP, CSET: bool2
 0x0000000000000000 AND
 0x0000000001000000 OR
 0x0000000002000000 XOR
@@ -1472,6 +1512,3 @@ sub getAddrVecRegisters
 }
 
 __END__
-
-
-
