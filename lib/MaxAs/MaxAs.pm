@@ -620,6 +620,68 @@ sub Test
     return $fail;
 }
 
+sub extract_preprocess
+{
+    my ($in) = @_;
+    my @newlines;
+    my @controls;
+    my @operations;
+    my $codelinecount = 0;
+    while(my $line = <$in>) {
+        # we will find all lines ending in */, ie which contain code and /or control codes
+        # and then move all control codes (first line, and every fourth line) into
+        # @controls, and all operations (everything between first */ and second /*)
+        # into @operaitons,
+        # then rewrite
+        if($line =~ m/ \*\//) {
+            my ($left, $rest) = split(/\*\//, $line);
+            my ($mid, $right) = split(/\/\*/, $rest);
+            if($codelinecount % 4 == 0) { # it's a control code line
+                # if $right is empty, we'll use $left
+                my $controlcode;
+                if($right =~ m/[^ ]/) {  # if $right not empty
+                    $controlcode = $right;
+                } else {
+                    $controlcode = $left;
+                }
+                $controlcode =~ s/[^xa-f0-9]+//g;
+                # so store the control code
+                push @controls, $controlcode;
+            }
+            my $op = $mid;
+            $op =~ s/\{//g;
+            $op =~ s/\}//g;
+            $op =~ s/^ +//g;
+            $op =~ s/ +$//g;
+            $op =~ s/\n//g;
+            if($op =~ m/[^ ]/) { # has an op
+                push @operations, $op;
+            }
+            $codelinecount++;
+        } else {
+            push @newlines, $line;
+        }
+    }
+    # now rewrite the ops and controls:
+    my $linecount = 0;
+    my $operationline = 0;
+    my $codeline = 0;
+    while($operationline < scalar @operations) {
+        my $newline = "";
+        if($linecount % 4 == 0) { # output code
+            $newline = sprintf "                                  /* %s */", $controls[$codeline];
+            $codeline++;
+        } else {
+            # no need for code
+            $newline = sprintf "    /*%.4x*/ %s /* 0x123456 */", $linecount * 8, $operations[$operationline];
+            $operationline++;
+        }
+        push @newlines, $newline;
+        $linecount++;
+    }
+    return @newlines;
+}
+
 # Convert cuobjdump sass to the working format
 sub Extract
 {
@@ -676,15 +738,19 @@ sub Extract
     my %labels;
     my $labelnum = 1;
 
+    my @lines = extract_preprocess($in);
+
     my @data;
-    FILE: while (my $line = <$in>)
+    FILE: for(my $i = 0; $i < scalar @lines; $i++)
     {
+        my $line = $lines[$i];
         my (@ctrl, @ruse);
         next unless processSassCtrlLine($line, \@ctrl, \@ruse);
 
         CTRL: foreach my $ctrl (@ctrl)
         {
-            $line = <$in>;
+            $i++;
+            $line = $lines[$i];
 
             my $inst = processSassLine($line) or next CTRL;
 
